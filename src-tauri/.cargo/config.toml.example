@@ -1,0 +1,11 @@
+# CARGO_TARGET_DIR workaround for environments where the project path contains spaces.
+#
+# MinGW binutils (as.exe, dlltool.exe) fail to link when the path to the build
+# artifacts contains spaces. Setting target-dir to a space-free path avoids this.
+#
+# Usage:
+#   Copy this file to src-tauri/.cargo/config.toml and adjust the path as needed.
+#   The actual config.toml is listed in .gitignore and must not be committed.
+
+[build]
+target-dir = "C:/cargo-target"
