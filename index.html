@@ -3,48 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Li+ Desktop</title>
+    <title>Li+ Chat</title>
     <script type="module" src="/src/main.ts" defer></script>
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
     <div id="app">
       <header id="titlebar">
-        <span class="title">Li+ Desktop</span>
+        <span class="title">Li+ Chat</span>
       </header>
-      <div id="tab-bar"></div>
-      <div id="tab-toolbar" class="tab-toolbar"></div>
-      <div id="tab-content-area"></div>
-    </div>
-
-    <!-- Settings Modal -->
-    <div id="settings-modal" class="modal-overlay" style="display:none">
-      <div class="modal-box">
-        <div class="modal-header">
-          <span class="modal-title">Tab Settings</span>
-          <button id="modal-close" class="modal-close-btn">&#x2715;</button>
-        </div>
-        <div class="modal-body">
-          <label class="modal-label">Name</label>
-          <input id="settings-name" class="modal-input" type="text" placeholder="e.g. Claude Code" />
-          <label class="modal-label">Command</label>
-          <input id="settings-command" class="modal-input" type="text" placeholder="e.g. claude" />
-          <label class="modal-label">Args <span class="modal-hint">(comma-separated)</span></label>
-          <input id="settings-args" class="modal-input" type="text" placeholder="e.g. --no-update-notifier" />
-          <label class="modal-label">Working Directory <span class="modal-hint">(leave blank for default)</span></label>
-          <input id="settings-cwd" class="modal-input" type="text" placeholder="e.g. C:\Users\you\projects" />
-          <label class="modal-label">CLI Kind</label>
-          <select id="settings-cli-kind" class="modal-input">
-            <option value="claude">Claude</option>
-            <option value="codex">Codex</option>
-            <option value="gemini">Gemini</option>
-          </select>
-        </div>
-        <div class="modal-footer">
-          <button id="settings-save" class="modal-save-btn">Save</button>
-          <button id="settings-cancel" class="modal-cancel-btn">Cancel</button>
-        </div>
-      </div>
+      <main id="room"></main>
     </div>
   </body>
 </html>

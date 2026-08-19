@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    liplus_desktop_lib::run()
+    liplus_chat_lib::run()
 }

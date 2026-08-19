@@ -21,3 +21,6 @@ Thumbs.db
 
 # Tauri
 src-tauri/gen/
+
+# Machine-local cargo override (see src-tauri/.cargo/config.toml.example)
+src-tauri/.cargo/config.toml
