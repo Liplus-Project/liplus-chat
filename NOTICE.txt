@@ -1,2 +1,2 @@
-neuron-graph-rag
+liplus-chat
 Copyright 2026 Yoshiharu Uematsu
