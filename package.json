@@ -8,15 +8,23 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "sidecar": "tsx sidecar/src/index.ts",
+    "sidecar:check": "tsc -p sidecar/tsconfig.json",
+    "sidecar:test": "node --test \"sidecar/test/*.test.mjs\""
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
-    "@tauri-apps/plugin-clipboard-manager": "^2"
+    "@tauri-apps/plugin-clipboard-manager": "^2",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@types/node": "^22.19.17",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.0.0",
     "typescript": "~5.6.2",
     "vite": "^6.0.3"
   }
