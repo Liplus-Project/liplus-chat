@@ -9,6 +9,8 @@ liplus-chat は、人間と複数の独立した AI / Li+ セッションが、�
 
 各 AI セッションの文脈と人格は独立したまま保ち、発言者を識別できる共通の場で対話する構想です。特定の AI に他のセッションの内部文脈を統合するのではなく、それぞれが自分の文脈から同じ会話へ参加する形を取ります。
 
+設計の詳細と、受容したトレードオフは [`docs/0-requirements.md`](docs/0-requirements.md) に記載しています。
+
 ## 設計姿勢
 
 - Li+ を含む各セッションを、独立した参加者として扱います。
@@ -95,6 +97,7 @@ MinGW のツールが、空白を含むビルド出力パスを扱えない場�
 ## 主な構成
 
 ```text
+docs/0-requirements.md  要求仕様（設計の source of truth）
 src/                  最小の TypeScript フロントエンド
 src-tauri/src/        Tauri、PTY、設定・セッション保存の Rust 実装
 portable-pty-patch/   Windows 対応を含む portable-pty のローカルパッチ
