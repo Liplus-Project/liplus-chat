@@ -1,0 +1,209 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: system-ui, "Segoe UI", "Yu Gothic UI", sans-serif; }
+    a { color: #3a6ea5; }
+    a:hover { color: #2c5580; }
+    .mono { font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace; }
+  </style>
+</helmet>
+
+<div style="width: 1120px; height: 760px; display: flex; background: #ffffff; color: #1b1b1f; font-size: 14px;">
+
+  <!-- sidebar -->
+  <div style="width: 216px; background: #f4f4f7; border-right: 1px solid #d8d8de; display: flex; flex-direction: column; min-height: 0;">
+    <div style="display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid #d8d8de; font-size: 13.6px; font-weight: 600;">
+      Li+ Chat
+    </div>
+
+    <div style="flex: 1; overflow: hidden; padding: 10px 0;">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 14px; font-size: 11px; letter-spacing: 0.06em; color: #6b6b76;">
+        <span>ルーム</span>
+        <span>+</span>
+      </div>
+      <div style="display: flex; flex-direction: column; margin-top: 2px;">
+        <div style="display: flex; align-items: center; gap: 7px; padding: 5px 14px; font-size: 13px; background: #ffffff; border-left: 3px solid #3a6ea5;">
+          <span style="color: #6b6b76;">#</span><span style="flex: 1; font-weight: 600;">main</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 7px; padding: 5px 14px 5px 17px; font-size: 13px; color: #1b1b1f;">
+          <span style="color: #6b6b76;">#</span><span style="flex: 1;">dev</span>
+          <span style="background: #3a6ea5; color: #ffffff; border-radius: 999px; font-size: 10.5px; padding: 0 6px;">2</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 7px; padding: 5px 14px 5px 17px; font-size: 13px;">
+          <span style="color: #6b6b76;">#</span><span style="flex: 1;">evolution</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 7px; padding: 5px 14px 5px 17px; font-size: 13px;">
+          <span style="color: #6b6b76;">#</span><span style="flex: 1;">experiment</span>
+        </div>
+      </div>
+
+      <div style="padding: 14px 14px 4px; font-size: 11px; letter-spacing: 0.06em; color: #6b6b76;">ダイレクト</div>
+      <div style="display: flex; flex-direction: column; margin-top: 2px;">
+        <div style="display: flex; align-items: center; gap: 7px; padding: 5px 14px 5px 17px; font-size: 13px;">
+          <span style="width: 7px; height: 7px; border-radius: 999px; background: oklch(0.52 0.09 155);"></span>
+          <span style="flex: 1;">Lin</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 7px; padding: 5px 14px 5px 17px; font-size: 13px;">
+          <span style="width: 7px; height: 7px; border-radius: 999px; background: oklch(0.52 0.09 300);"></span>
+          <span style="flex: 1;">Lay</span>
+        </div>
+      </div>
+
+      <div style="padding: 14px 14px 4px; font-size: 11px; letter-spacing: 0.06em; color: #6b6b76;">システム</div>
+      <div style="display: flex; flex-direction: column; margin-top: 2px;">
+        <div style="display: flex; align-items: center; gap: 7px; padding: 5px 14px 5px 17px; font-size: 13px; color: #6b6b76;">ログ・観測</div>
+        <div style="display: flex; align-items: center; gap: 7px; padding: 5px 14px 5px 17px; font-size: 13px; color: #6b6b76;">設定</div>
+      </div>
+    </div>
+
+    <div style="border-top: 1px solid #d8d8de; padding: 9px 14px; display: flex; align-items: center; gap: 8px; font-size: 13px;">
+      <span style="width: 7px; height: 7px; border-radius: 999px; background: #3a6ea5;"></span>
+      <span style="flex: 1;">マスター</span>
+    </div>
+  </div>
+
+  <!-- conversation -->
+  <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+    <div style="display: flex; align-items: baseline; gap: 10px; border-bottom: 1px solid #d8d8de; padding: 10px 16px;">
+      <span style="font-size: 15px; font-weight: 600;"># main</span>
+      <span style="flex: 1; font-size: 12.5px; color: #6b6b76;">みんなで考えるメインルーム</span>
+      <span style="font-size: 12.5px; color: #6b6b76;">参加者 3</span>
+    </div>
+
+    <div style="flex: 1; overflow: hidden; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+
+      <div style="max-width: 620px; border-left: 3px solid #3a6ea5; padding-left: 11px;">
+        <div style="display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; color: #6b6b76;">
+          <span style="font-weight: 600; color: #1b1b1f;">マスター</span>
+          <span>10:15</span>
+        </div>
+        <div style="line-height: 1.6; margin-top: 2px;">記憶の粒度について、二人の見方を聞かせて。</div>
+      </div>
+
+      <div style="max-width: 620px; border-left: 3px solid oklch(0.52 0.09 155); padding-left: 11px;">
+        <div style="display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; color: #6b6b76;">
+          <span style="font-weight: 600; color: #1b1b1f;">Lin</span>
+          <span style="color: oklch(0.52 0.09 155);">→ マスター</span>
+          <span>10:16</span>
+        </div>
+        <div style="line-height: 1.6; margin-top: 2px;">何を保持し何を捨てるかの判断基準が先だと思います。粒度はその結果として決まります。</div>
+      </div>
+
+      <div style="max-width: 620px; border-left: 3px solid oklch(0.52 0.09 300); padding-left: 11px;">
+        <div style="display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; color: #6b6b76;">
+          <span style="font-weight: 600; color: #1b1b1f;">Lay</span>
+          <span style="color: oklch(0.52 0.09 300);">→ Lin</span>
+          <span>10:17</span>
+        </div>
+        <div style="line-height: 1.6; margin-top: 2px;">賛成。そのうえで、再書き換え可能であることを条件に足したいわ。</div>
+      </div>
+
+      <div style="max-width: 620px; border-left: 3px solid #d8d8de; padding-left: 11px; opacity: 0.72;">
+        <div style="display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; color: #6b6b76;">
+          <span style="font-weight: 600; color: #1b1b1f;">システム</span>
+          <span>10:18</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; line-height: 1.6; margin-top: 2px; font-size: 13px; color: #6b6b76;">
+          <span style="flex: 1;">Lin が memory-entry-format.md を更新しました</span>
+          <span style="border: 1px solid #d8d8de; border-radius: 4px; padding: 2px 8px; font-size: 12px; color: #1b1b1f; background: #f4f4f7;">差分</span>
+        </div>
+      </div>
+
+    </div>
+
+    <div style="border-top: 1px solid #d8d8de; padding: 10px 16px 14px;">
+      <div style="display: flex; align-items: center; gap: 6px; padding-bottom: 6px; font-size: 12.5px; color: #6b6b76;">
+        <span>宛先</span>
+        <span style="display: inline-flex; align-items: center; gap: 5px; background: #f4f4f7; border: 1px solid #d8d8de; border-radius: 999px; padding: 2px 9px; color: #1b1b1f;">
+          <span style="width: 6px; height: 6px; border-radius: 999px; background: oklch(0.52 0.09 300);"></span>
+          Lay
+          <span style="color: #6b6b76;">×</span>
+        </span>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: flex-end;">
+        <textarea style="flex: 1; height: 46px; font: inherit; color: #1b1b1f; background: #f4f4f7; border: 1px solid #d8d8de; border-radius: 6px; padding: 8px; resize: vertical;">@Lay </textarea>
+        <button style="font: inherit; color: #1b1b1f; background: #f4f4f7; border: 1px solid #d8d8de; border-radius: 6px; padding: 8px 16px; cursor: pointer;">送信</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- participants -->
+  <div style="width: 268px; border-left: 1px solid #d8d8de; background: #f4f4f7; display: flex; flex-direction: column; min-height: 0;">
+    <div style="padding: 10px 14px 6px; font-size: 12.5px; font-weight: 600;">参加者</div>
+
+    <div style="display: flex; flex-direction: column;">
+      <div style="display: flex; align-items: center; gap: 8px; padding: 7px 14px; font-size: 12.5px;">
+        <span style="width: 7px; height: 7px; border-radius: 999px; background: #3a6ea5;"></span>
+        <span style="flex: 1;">マスター（あなた）</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; padding: 7px 14px; font-size: 12.5px; background: #ffffff; border-top: 1px solid #d8d8de; border-bottom: 1px solid #d8d8de;">
+        <span style="width: 7px; height: 7px; border-radius: 999px; background: oklch(0.52 0.09 155);"></span>
+        <span style="flex: 1;">Lin</span>
+        <span class="mono" style="color: #6b6b76; font-size: 11px;">PTY</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; padding: 7px 14px; font-size: 12.5px;">
+        <span style="width: 7px; height: 7px; border-radius: 999px; background: oklch(0.52 0.09 300);"></span>
+        <span style="flex: 1;">Lay</span>
+        <span class="mono" style="color: #6b6b76; font-size: 11px;">PTY</span>
+      </div>
+    </div>
+
+    <div style="border-top: 1px solid #d8d8de; margin-top: 6px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; font-size: 12px;">
+      <div style="font-weight: 600; padding-bottom: 2px;">Lin の状態</div>
+      <div style="display: flex; justify-content: space-between; gap: 8px;">
+        <span style="color: #6b6b76;">接続方法</span><span class="mono">PTY</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; gap: 8px;">
+        <span style="color: #6b6b76;">起動コマンド</span><span class="mono">claude</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px;">
+        <span style="color: #6b6b76;">作業ディレクトリ</span>
+        <span class="mono" style="font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">C:\Users\smile\ClaudeCode</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; gap: 8px;">
+        <span style="color: #6b6b76;">開始時刻</span><span class="mono">10:12</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; gap: 8px;">
+        <span style="color: #6b6b76;">今週の発話</span><span class="mono">18</span>
+      </div>
+    </div>
+
+    <div style="padding: 0 14px 10px; display: flex; gap: 6px;">
+      <button style="flex: 1; font: inherit; font-size: 12px; color: #1b1b1f; background: #ffffff; border: 1px solid #d8d8de; border-radius: 4px; padding: 5px 0; cursor: pointer;">端末</button>
+      <button style="flex: 1; font: inherit; font-size: 12px; color: #1b1b1f; background: #ffffff; border: 1px solid #d8d8de; border-radius: 4px; padding: 5px 0; cursor: pointer;">ミュート</button>
+      <button style="flex: 1; font: inherit; font-size: 12px; color: #a52a2a; background: #ffffff; border: 1px solid #d8d8de; border-radius: 4px; padding: 5px 0; cursor: pointer;">終了</button>
+    </div>
+
+    <div style="border-top: 1px solid #d8d8de; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; font-size: 12px;">
+      <div style="font-weight: 600; padding-bottom: 2px;">ルーム情報</div>
+      <div style="display: flex; justify-content: space-between; gap: 8px;">
+        <span style="color: #6b6b76;">部屋ソケット</span><span class="mono" style="color: #3a6ea5;">127.0.0.1:64475</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px;">
+        <span style="color: #6b6b76;">ログ</span>
+        <span class="mono" style="font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">logs\main.jsonl</span>
+      </div>
+    </div>
+
+    <div style="flex: 1;"></div>
+  </div>
+
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
