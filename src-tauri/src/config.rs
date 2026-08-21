@@ -43,51 +43,22 @@ pub struct TabSessions {
     pub sessions: Vec<SessionData>,
 }
 
-/// Legacy config format for migration
-#[derive(Debug, Clone, Deserialize)]
-struct LegacyPaneConfig {
-    command: String,
-    args: Vec<String>,
-    cwd: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct LegacyAppConfig {
-    left: LegacyPaneConfig,
-    right: LegacyPaneConfig,
-}
-
-fn cli_kind_from_command(command: &str) -> String {
-    if command.to_lowercase().contains("codex") {
-        "codex".to_string()
-    } else if command.to_lowercase().contains("gemini") {
-        "gemini".to_string()
-    } else {
-        "claude".to_string()
-    }
-}
-
 impl Default for AppConfig {
     fn default() -> Self {
+        // One vendor, by decision rather than by omission: the room is built
+        // on a channel capability only this CLI is known to have, and the
+        // spec drops the second vendor to keep that premise out of the
+        // design. Shipping a tab that cannot join the room by default would
+        // present a session that never speaks. See docs/0-requirements.md.
         AppConfig {
-            tabs: vec![
-                TabConfig {
-                    id: "tab-1".to_string(),
-                    name: "Claude Code".to_string(),
-                    command: "claude".to_string(),
-                    args: vec![],
-                    cwd: None,
-                    cli_kind: "claude".to_string(),
-                },
-                TabConfig {
-                    id: "tab-2".to_string(),
-                    name: "Codex".to_string(),
-                    command: "codex".to_string(),
-                    args: vec![],
-                    cwd: None,
-                    cli_kind: "codex".to_string(),
-                },
-            ],
+            tabs: vec![TabConfig {
+                id: "tab-1".to_string(),
+                name: "Claude Code".to_string(),
+                command: "claude".to_string(),
+                args: vec![],
+                cwd: None,
+                cli_kind: "claude".to_string(),
+            }],
         }
     }
 }
@@ -109,41 +80,12 @@ pub fn load_config(app: AppHandle) -> Result<AppConfig, String> {
     let content =
         std::fs::read_to_string(&path).map_err(|e| format!("Failed to read config: {e}"))?;
 
-    // Try parsing as new format first
-    if let Ok(config) = serde_json::from_str::<AppConfig>(&content) {
-        return Ok(config);
-    }
-
-    // Fall back to legacy left/right format and migrate
-    if let Ok(legacy) = serde_json::from_str::<LegacyAppConfig>(&content) {
-        let migrated = AppConfig {
-            tabs: vec![
-                TabConfig {
-                    id: "tab-1".to_string(),
-                    name: "Claude Code".to_string(),
-                    command: legacy.left.command.clone(),
-                    args: legacy.left.args,
-                    cwd: legacy.left.cwd,
-                    cli_kind: cli_kind_from_command(&legacy.left.command),
-                },
-                TabConfig {
-                    id: "tab-2".to_string(),
-                    name: "Codex".to_string(),
-                    command: legacy.right.command.clone(),
-                    args: legacy.right.args,
-                    cwd: legacy.right.cwd,
-                    cli_kind: cli_kind_from_command(&legacy.right.command),
-                },
-            ],
-        };
-        // Save migrated config
-        if let Ok(json) = serde_json::to_string_pretty(&migrated) {
-            let _ = std::fs::write(&path, json);
-        }
-        return Ok(migrated);
-    }
-
-    Err("Failed to parse config: unrecognized format".to_string())
+    // No legacy migration path exists. liplus-chat has never shipped a
+    // release, and its app data directory is keyed to its own identifier
+    // (org.liplus-project.liplus-chat), so no config in the older
+    // left/right pane format from liplus-desktop can reach this app.
+    serde_json::from_str::<AppConfig>(&content)
+        .map_err(|e| format!("Failed to parse config: {e}"))
 }
 
 #[tauri::command]
