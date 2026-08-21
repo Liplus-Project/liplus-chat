@@ -57,9 +57,30 @@ const toggleEl = document.getElementById("toggle-diagnostics") as HTMLButtonElem
 const socketStateEl = document.getElementById("socket-state") as HTMLElement;
 const sessionStateEl = document.getElementById("session-state") as HTMLElement;
 const logEl = document.getElementById("session-log") as HTMLPreElement;
+const cwdEl = document.getElementById("session-cwd") as HTMLInputElement;
+const sessionInputEl = document.getElementById("session-input") as HTMLInputElement;
+const keyEls = Array.from(
+  document.querySelectorAll<HTMLButtonElement>("#session-keys .key"),
+);
 
 let tabs: TabConfig[] = [];
 let logLines: string[] = [];
+/** The session the diagnostics keyboard is attached to, once one is running. */
+let activePtyId: string | null = null;
+
+// Control bytes built from character codes rather than written as escapes: the
+// same reason the strip patterns below say so. A CLI prompt is navigated with
+// these, and the folder-trust prompt is the first thing every session shows.
+const CTRL_C = String.fromCharCode(3);
+const CARRIAGE_RETURN = String.fromCharCode(13);
+const ESCAPE = String.fromCharCode(27);
+const KEYS: Record<string, string> = {
+  enter: CARRIAGE_RETURN,
+  up: ESCAPE + "[A",
+  down: ESCAPE + "[B",
+  escape: ESCAPE,
+  interrupt: CTRL_C,
+};
 
 function status(text: string, kind: "info" | "error" = "info"): void {
   statusEl.textContent = text;
@@ -70,6 +91,28 @@ function status(text: string, kind: "info" | "error" = "info"): void {
 function revealDiagnostics(): void {
   diagnosticsEl.hidden = false;
   toggleEl.setAttribute("aria-expanded", "true");
+}
+
+function setKeyboardEnabled(enabled: boolean): void {
+  sessionInputEl.disabled = !enabled;
+  for (const key of keyEls) key.disabled = !enabled;
+}
+
+/**
+ * Send raw bytes to the running session.
+ *
+ * The CLI asks before it will work in a directory, and that question is a
+ * security question: the app must not answer it. What the app owes is a way
+ * for the person to answer it themselves — without this the session stops at
+ * the first prompt and the room can never come up.
+ */
+async function sendToSession(data: string): Promise<void> {
+  if (activePtyId === null) return;
+  try {
+    await invoke("write_pty", { id: activePtyId, data });
+  } catch (err) {
+    status(`セッションへ送れませんでした: ${err}`, "error");
+  }
 }
 
 // Terminal control sequences, built from escapes rather than written as
@@ -170,6 +213,8 @@ async function send(): Promise<void> {
 async function followSession(tab: TabConfig, started: StartedSession): Promise<void> {
   sessionStateEl.textContent = `${tab.name} 起動中`;
   sessionStateEl.dataset.kind = "ok";
+  activePtyId = started.pty_id;
+  setKeyboardEnabled(true);
 
   await listen<string>(`pty-data-${started.pty_id}`, (event) => appendLog(event.payload));
   await listen<number | null>(`pty-exit-${started.pty_id}`, (event) => {
@@ -178,8 +223,14 @@ async function followSession(tab: TabConfig, started: StartedSession): Promise<v
     sessionStateEl.textContent = `${tab.name} 終了（${detail}）`;
     sessionStateEl.dataset.kind = "error";
     status(`${tab.name} が終了しました（${detail}）。診断を確認してください。`, "error");
+    activePtyId = null;
+    setKeyboardEnabled(false);
     revealDiagnostics();
   });
+
+  // The first thing a session shows is a question, so the pane that carries
+  // the answer opens with it rather than waiting for a failure.
+  revealDiagnostics();
 }
 
 async function startSession(): Promise<void> {
@@ -189,13 +240,30 @@ async function startSession(): Promise<void> {
     return;
   }
 
+  const cwd = cwdEl.value.trim();
+  if (!cwd) {
+    status("作業ディレクトリを入力してください。", "error");
+    cwdEl.focus();
+    return;
+  }
+  // The directory is the person's choice, so it is carried on the tab and
+  // saved. Falling back to whatever directory the app process happens to sit
+  // in is what put a session in src-tauri (#20).
+  const launching: TabConfig = { ...tab, cwd };
+
   startEl.disabled = true;
   status(`${tab.name} を起動しています…`);
   try {
     const started = await invoke<StartedSession>("start_session", {
-      tab,
+      tab: launching,
       cols: 120,
       rows: 30,
+    });
+    tab.cwd = cwd;
+    void invoke("save_config", { config: { tabs } }).catch(() => {
+      // A directory that fails to persist is worth one line, not a failed
+      // launch: the session is already up.
+      status("作業ディレクトリを保存できませんでした。", "error");
     });
     status(`${tab.name} を起動しました。${started.mcp_config} に登録済み。`);
     await followSession(tab, started);
@@ -251,6 +319,32 @@ async function main(): Promise<void> {
   });
   startEl.addEventListener("click", () => void startSession());
 
+  sessionInputEl.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.isComposing) return;
+    event.preventDefault();
+    const text = sessionInputEl.value;
+    sessionInputEl.value = "";
+    void sendToSession(text + KEYS.enter);
+  });
+  for (const key of keyEls) {
+    key.addEventListener("click", () => {
+      const sequence = KEYS[key.dataset.key ?? ""];
+      if (sequence) void sendToSession(sequence);
+    });
+  }
+
+  let home = "";
+  try {
+    home = await invoke<string>("home_dir");
+  } catch {
+    // Only the prefill is lost; the field is still typed into by hand.
+  }
+
+  const showCwd = (): void => {
+    const tab = tabs.find((candidate) => candidate.id === tabEl.value);
+    cwdEl.value = tab?.cwd ?? home;
+  };
+
   try {
     const config = await invoke<AppConfig>("load_config");
     tabs = config.tabs;
@@ -260,6 +354,8 @@ async function main(): Promise<void> {
       option.textContent = tab.name;
       tabEl.appendChild(option);
     }
+    showCwd();
+    tabEl.addEventListener("change", showCwd);
   } catch (err) {
     status(`設定を読み込めませんでした: ${err}`, "error");
   }

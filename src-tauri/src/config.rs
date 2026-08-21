@@ -63,6 +63,18 @@ impl Default for AppConfig {
     }
 }
 
+/// The user's home directory, used to prefill a session's working directory.
+///
+/// A prefill, not a default: the app never launches a session anywhere the
+/// person has not seen on screen.
+#[tauri::command]
+pub fn home_dir(app: AppHandle) -> Result<String, String> {
+    app.path()
+        .home_dir()
+        .map(|dir| dir.to_string_lossy().to_string())
+        .map_err(|e| format!("Failed to resolve home dir: {e}"))
+}
+
 fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()

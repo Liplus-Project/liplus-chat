@@ -6,6 +6,9 @@ dist/
 src-tauri/target/
 crates/*/target/
 
+# Written by a session launched from this directory (see src-tauri/src/session.rs)
+.mcp.json
+
 # Environment
 .env
 .env.*

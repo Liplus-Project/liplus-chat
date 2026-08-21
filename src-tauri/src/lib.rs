@@ -32,6 +32,7 @@ pub fn run() {
             pty::write_pty,
             pty::resize_pty,
             pty::kill_pty,
+            config::home_dir,
             config::load_config,
             config::save_config,
             config::save_sessions,
