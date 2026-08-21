@@ -135,6 +135,10 @@ body {
   color: var(--fg);
 }
 
+.message .to {
+  color: var(--accent);
+}
+
 .message .body {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -150,6 +154,31 @@ body {
   align-items: flex-end;
   border-top: 1px solid var(--line);
   padding: 0.6rem 0.9rem;
+}
+
+/* The addressee sits at the left of the composer, ahead of what is typed:
+   choosing who is being addressed comes before the words, and a control placed
+   after the textarea is one that gets set after the sentence is already
+   written. */
+#composer .to {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  /* The composer aligns to flex-end so the button sits with the last line of a
+     grown textarea; the addressee follows that same baseline. */
+  align-self: flex-end;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+#composer select {
+  font: inherit;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.5rem 0.4rem;
+  max-width: 10rem;
 }
 
 #composer textarea {
