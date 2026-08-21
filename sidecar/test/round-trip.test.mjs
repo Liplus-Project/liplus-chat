@@ -179,7 +179,9 @@ test("room say reaches the channel, and say_to_room reaches the room", async (t)
   );
 
   const pushed = await nextNotification("notifications/claude/channel");
-  assert.match(pushed.params.content, /Master: 聞こえる？/);
+  // Body only: the speaker belongs in meta, and the host renders it. Mixing it
+  // into the body showed the name twice on screen (#28).
+  assert.equal(pushed.params.content, "聞こえる？");
   assert.equal(pushed.params.meta.chat_id, "test-room");
   assert.equal(pushed.params.meta.message_id, "m-1");
   assert.equal(pushed.params.meta.user, "Master");

@@ -196,7 +196,10 @@ function pushToChannel(frame: SayFrame): void {
   void mcp.notification({
     method: "notifications/claude/channel",
     params: {
-      content: `${user}: ${content}`,
+      // Body only. The speaker rides in meta, which the host renders itself —
+      // putting the name here too produced "マスター: マスター: ハロ～" (#28),
+      // and it leaves the body no longer equal to what was said.
+      content,
       meta: {
         chat_id: CHAT_ID,
         message_id: frame.message_id ?? randomUUID(),
