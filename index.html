@@ -30,9 +30,10 @@
 
       <main id="room" aria-live="polite"></main>
 
-      <!-- Diagnostics, not the conversation surface. The room shows messages;
-           this shows whether the machinery under it is alive, and carries the
-           keyboard the CLI needs before it will start at all. -->
+      <!-- Diagnostics, not the conversation surface. The room shows what was
+           said; this shows the CLI that was launched, as it actually renders.
+           Nothing here is read as a message: the room's lines come from the
+           channel and from say_to_room, never from this output. -->
       <aside id="diagnostics" hidden>
         <dl class="facts">
           <dt>部屋ソケット</dt>
@@ -41,22 +42,7 @@
           <dd id="session-state">未起動</dd>
         </dl>
 
-        <pre id="session-log" aria-label="セッションの出力"></pre>
-
-        <div id="session-keys">
-          <input
-            id="session-input"
-            type="text"
-            spellcheck="false"
-            placeholder="セッションへ入力（Enter で送信）"
-            disabled
-          />
-          <button class="key" type="button" data-key="enter" disabled>Enter</button>
-          <button class="key" type="button" data-key="up" disabled>↑</button>
-          <button class="key" type="button" data-key="down" disabled>↓</button>
-          <button class="key" type="button" data-key="escape" disabled>Esc</button>
-          <button class="key" type="button" data-key="interrupt" disabled>Ctrl+C</button>
-        </div>
+        <div id="terminal" aria-label="セッションの端末"></div>
       </aside>
 
       <footer id="composer">
