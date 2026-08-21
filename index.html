@@ -16,16 +16,23 @@
           名前
           <input id="display-name" type="text" value="human" spellcheck="false" />
         </label>
-        <select id="tab-select" aria-label="起動するセッション"></select>
-        <button id="start-session" type="button">セッション参加</button>
         <button id="toggle-diagnostics" type="button" aria-expanded="false">診断</button>
       </header>
+
+      <div id="launcher">
+        <select id="tab-select" aria-label="起動するセッション"></select>
+        <label class="cwd">
+          作業ディレクトリ
+          <input id="session-cwd" type="text" spellcheck="false" />
+        </label>
+        <button id="start-session" type="button">セッション参加</button>
+      </div>
 
       <main id="room" aria-live="polite"></main>
 
       <!-- Diagnostics, not the conversation surface. The room shows messages;
-           this shows whether the machinery under it is alive. Collapsed by
-           default so it does not compete with the room. -->
+           this shows whether the machinery under it is alive, and carries the
+           keyboard the CLI needs before it will start at all. -->
       <aside id="diagnostics" hidden>
         <dl class="facts">
           <dt>部屋ソケット</dt>
@@ -33,7 +40,23 @@
           <dt>セッション</dt>
           <dd id="session-state">未起動</dd>
         </dl>
+
         <pre id="session-log" aria-label="セッションの出力"></pre>
+
+        <div id="session-keys">
+          <input
+            id="session-input"
+            type="text"
+            spellcheck="false"
+            placeholder="セッションへ入力（Enter で送信）"
+            disabled
+          />
+          <button class="key" type="button" data-key="enter" disabled>Enter</button>
+          <button class="key" type="button" data-key="up" disabled>↑</button>
+          <button class="key" type="button" data-key="down" disabled>↓</button>
+          <button class="key" type="button" data-key="escape" disabled>Esc</button>
+          <button class="key" type="button" data-key="interrupt" disabled>Ctrl+C</button>
+        </div>
       </aside>
 
       <footer id="composer">

@@ -73,10 +73,17 @@ pub fn start_session(
         .ok_or_else(|| "The room socket is not listening yet.".to_string())?;
     let room_url = format!("ws://127.0.0.1:{port}");
 
-    let cwd = match tab.cwd.as_deref() {
-        Some(dir) => PathBuf::from(dir),
-        None => std::env::current_dir()
-            .map_err(|e| format!("Failed to resolve the working directory: {e}"))?,
+    // No fallback to the app's own process directory. Under `tauri dev` that
+    // is `src-tauri`, and a session silently launched there is a session the
+    // person never chose and cannot see they got (#20).
+    let cwd = match tab.cwd.as_deref().map(str::trim) {
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => {
+            return Err(format!(
+                "Tab \"{}\" has no working directory. Set one before starting a session.",
+                tab.name
+            ))
+        }
     };
     if !cwd.is_dir() {
         return Err(format!("Tab \"{}\" points at a missing directory: {}", tab.name, cwd.display()));

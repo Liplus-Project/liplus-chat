@@ -238,3 +238,86 @@ body {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* ── launcher ────────────────────────────────────────────────────────────── */
+
+/* Its own row rather than the titlebar: the working directory is a path, and a
+   path squeezed into a title strip is a path nobody reads before launching. */
+#launcher {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.4rem 0.9rem;
+  font-size: 0.8rem;
+}
+
+#launcher .cwd {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 1;
+  color: var(--muted);
+}
+
+#launcher input,
+#launcher select,
+#launcher button {
+  font: inherit;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.25rem 0.45rem;
+}
+
+#launcher .cwd input {
+  flex: 1;
+  font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+  font-size: 0.75rem;
+}
+
+#launcher button {
+  cursor: pointer;
+}
+
+#launcher button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* ── session keyboard ────────────────────────────────────────────────────── */
+
+#session-keys {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+#session-input {
+  flex: 1;
+  font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+  font-size: 0.75rem;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.3rem 0.45rem;
+}
+
+#session-keys .key {
+  font: inherit;
+  font-size: 0.72rem;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.3rem 0.5rem;
+  cursor: pointer;
+}
+
+#session-keys .key:disabled,
+#session-input:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
