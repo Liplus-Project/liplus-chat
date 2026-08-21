@@ -29,10 +29,6 @@ use uuid::Uuid;
 /// Bumped when a frame's shape changes in a way a sidecar must notice.
 pub const PROTOCOL_VERSION: u32 = 1;
 
-/// The name the sidecar is registered under in `.mcp.json`. The launch flag
-/// carries the same name (`server:<name>`), so the two must not drift apart.
-pub const SERVER_NAME: &str = "liplus-chat-room";
-
 /// One line of the room, as the frontend sees it.
 #[derive(Debug, Clone, Serialize)]
 pub struct RoomMessage {

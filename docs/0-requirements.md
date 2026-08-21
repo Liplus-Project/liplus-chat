@@ -156,8 +156,25 @@ liplus-desktop の `stream_parser.rs` および `spawn_stream_pty` / `spawn_stre
 
 - 複数の AI セッションを同一の部屋へ参加させる運用（同時発話の抑制を含む）
 - 会話ログの永続化と観測 UI
-- `cargo test` と `npm run sidecar:test` の CI 実行
 - plugin としての allowlist 掲載（配布の第二段階）
+
+## テストの配置
+
+`.mcp.json` への登録と起動フラグの検査は、`crates/mcp-config/` という tauri 非依存の crate に置く。
+
+理由は依存の正しさと、テストが実行できることの両方である。これらのロジックが tauri を必要とする理由はそもそも無い。加えて `src-tauri` 側に置くと、テストバイナリが tauri の依存ツリー全体をリンクするため、GNU ターゲットでは `STATUS_ENTRYPOINT_NOT_FOUND`（`0xc0000139`）でプロセスが起動せず、アサーションが一度も実行されない。これはローカル環境固有ではなく CI でも再現する（run 32431917979）。特定の依存クレートまでは切り分けていない。
+
+したがって `src-tauri/src/` に残すのは、tauri の `State` / `AppHandle` に触れる部分だけとする。純粋ロジックをそちらへ書き足すと、書いた時点で検証不能になる。
+
+CI が実行するもの:
+
+| コマンド | 対象 |
+|---|---|
+| `npm run build` | フロントエンドの型検査とビルド |
+| `npm run sidecar:check` | サイドカーの型検査 |
+| `npm run sidecar:test` | サイドカーの往復ハーネス |
+| `cargo check --target x86_64-pc-windows-gnu` | アプリのコンパイル |
+| `cargo test`（`crates/mcp-config`） | `.mcp.json` マージ保全と起動フラグ検査 |
 
 ## 往復が成立しないときの切り分け
 

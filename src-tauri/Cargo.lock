@@ -2136,6 +2136,7 @@ name = "liplus-chat"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "mcp-config",
  "parking_lot",
  "portable-pty",
  "serde",
@@ -2179,6 +2180,13 @@ dependencies = [
  "log",
  "tendril",
  "web_atoms",
+]
+
+[[package]]
+name = "mcp-config"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]
