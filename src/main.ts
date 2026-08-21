@@ -5,12 +5,17 @@
 // appended locally on send — it comes back through the same event the agents'
 // replies do. See src-tauri/src/room.rs.
 //
-// No terminal in the room on purpose: a CLI's raw output is not a message
-// source (docs/0-requirements.md). The diagnostics pane is a separate surface
-// and exists for the opposite reason — when nothing arrives, the machinery
-// under the room has to be readable without a console.
+// The diagnostics pane carries a real terminal for the launched CLI. That is a
+// display, not a message source: the room's lines come from the channel and
+// from `say_to_room`, and nothing in this file reads terminal output as
+// speech. The rejected design is the one where the app parses CLI output to
+// find messages (docs/0-requirements.md); showing the CLI is not that.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { readText } from "@tauri-apps/plugin-clipboard-manager";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css";
 
 interface RoomMessage {
   message_id: string;
@@ -41,8 +46,6 @@ interface StartedSession {
 }
 
 const NAME_KEY = "liplus-chat.display-name";
-/** Lines of CLI output kept for triage. Enough to hold a startup failure. */
-const LOG_LIMIT = 400;
 
 const roomEl = document.getElementById("room") as HTMLElement;
 const rosterEl = document.getElementById("roster") as HTMLElement;
@@ -56,85 +59,54 @@ const diagnosticsEl = document.getElementById("diagnostics") as HTMLElement;
 const toggleEl = document.getElementById("toggle-diagnostics") as HTMLButtonElement;
 const socketStateEl = document.getElementById("socket-state") as HTMLElement;
 const sessionStateEl = document.getElementById("session-state") as HTMLElement;
-const logEl = document.getElementById("session-log") as HTMLPreElement;
+const terminalEl = document.getElementById("terminal") as HTMLElement;
 const cwdEl = document.getElementById("session-cwd") as HTMLInputElement;
-const sessionInputEl = document.getElementById("session-input") as HTMLInputElement;
-const keyEls = Array.from(
-  document.querySelectorAll<HTMLButtonElement>("#session-keys .key"),
-);
 
 let tabs: TabConfig[] = [];
-let logLines: string[] = [];
-/** The session the diagnostics keyboard is attached to, once one is running. */
+/** The session the terminal is attached to, once one is running. */
 let activePtyId: string | null = null;
 
-// Control bytes built from character codes rather than written as escapes: the
-// same reason the strip patterns below say so. A CLI prompt is navigated with
-// these, and the folder-trust prompt is the first thing every session shows.
-const CTRL_C = String.fromCharCode(3);
-const CARRIAGE_RETURN = String.fromCharCode(13);
-const ESCAPE = String.fromCharCode(27);
-const KEYS: Record<string, string> = {
-  enter: CARRIAGE_RETURN,
-  up: ESCAPE + "[A",
-  down: ESCAPE + "[B",
-  escape: ESCAPE,
-  interrupt: CTRL_C,
-};
+const terminal = new Terminal({
+  cursorBlink: true,
+  fontSize: 13,
+  fontFamily: 'ui-monospace, "Cascadia Mono", Consolas, monospace',
+  // The CLI is a full-screen TUI: it moves the cursor, clears regions and
+  // repaints. Anything less than an emulator turns that into debris, which is
+  // what the previous line-appending pane did (#24).
+  convertEol: false,
+  scrollback: 5000,
+});
+const fitAddon = new FitAddon();
 
 function status(text: string, kind: "info" | "error" = "info"): void {
   statusEl.textContent = text;
   statusEl.dataset.kind = kind;
 }
 
-/** Open the diagnostics pane. Called when something goes wrong on its own. */
 function revealDiagnostics(): void {
   diagnosticsEl.hidden = false;
   toggleEl.setAttribute("aria-expanded", "true");
+  // The container has no size while hidden, so the fit has to wait for layout.
+  requestAnimationFrame(() => fitTerminal());
 }
 
-function setKeyboardEnabled(enabled: boolean): void {
-  sessionInputEl.disabled = !enabled;
-  for (const key of keyEls) key.disabled = !enabled;
-}
-
-/**
- * Send raw bytes to the running session.
- *
- * The CLI asks before it will work in a directory, and that question is a
- * security question: the app must not answer it. What the app owes is a way
- * for the person to answer it themselves — without this the session stops at
- * the first prompt and the room can never come up.
- */
-async function sendToSession(data: string): Promise<void> {
-  if (activePtyId === null) return;
+function fitTerminal(): void {
+  if (diagnosticsEl.hidden) return;
   try {
-    await invoke("write_pty", { id: activePtyId, data });
-  } catch (err) {
-    status(`セッションへ送れませんでした: ${err}`, "error");
+    fitAddon.fit();
+  } catch {
+    // A fit against a zero-sized container is not worth a message.
+    return;
   }
-}
-
-// Terminal control sequences, built from escapes rather than written as
-// literal control bytes: a raw 0x1b in the source survives an editor round
-// trip only by luck. This pane is read, not driven, so the sequences are
-// stripped rather than interpreted.
-const CSI = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
-const OSC = /\x1b[\]P^_][^\x1b\x07]*(?:\x1b\\|\x07)?/g;
-const SHORT_ESCAPE = /\x1b[@-Z\\-_]/g;
-
-function appendLog(chunk: string): void {
-  const plain = chunk
-    .replace(CSI, "")
-    .replace(OSC, "")
-    .replace(SHORT_ESCAPE, "")
-    .replace(/\r/g, "");
-
-  const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
-  logLines.push(...plain.split("\n"));
-  if (logLines.length > LOG_LIMIT) logLines = logLines.slice(-LOG_LIMIT);
-  logEl.textContent = logLines.join("\n");
-  if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+  if (activePtyId !== null) {
+    void invoke("resize_pty", {
+      id: activePtyId,
+      cols: terminal.cols,
+      rows: terminal.rows,
+    }).catch(() => {
+      // The session may have exited between the fit and the call.
+    });
+  }
 }
 
 function shortTime(iso: string): string {
@@ -207,16 +179,15 @@ async function send(): Promise<void> {
  * Follow a launched session until it dies.
  *
  * A session that exits on startup is the failure mode with no other witness:
- * there is no terminal, and the room simply stays empty. Without this the
- * screen is identical whether the CLI is running or was never there.
+ * the room simply stays empty. Without this the screen is identical whether
+ * the CLI is running or was never there.
  */
 async function followSession(tab: TabConfig, started: StartedSession): Promise<void> {
   sessionStateEl.textContent = `${tab.name} 起動中`;
   sessionStateEl.dataset.kind = "ok";
   activePtyId = started.pty_id;
-  setKeyboardEnabled(true);
 
-  await listen<string>(`pty-data-${started.pty_id}`, (event) => appendLog(event.payload));
+  await listen<string>(`pty-data-${started.pty_id}`, (event) => terminal.write(event.payload));
   await listen<number | null>(`pty-exit-${started.pty_id}`, (event) => {
     const code = event.payload;
     const detail = code === null ? "終了コード不明" : `終了コード ${code}`;
@@ -224,13 +195,13 @@ async function followSession(tab: TabConfig, started: StartedSession): Promise<v
     sessionStateEl.dataset.kind = "error";
     status(`${tab.name} が終了しました（${detail}）。診断を確認してください。`, "error");
     activePtyId = null;
-    setKeyboardEnabled(false);
     revealDiagnostics();
   });
 
   // The first thing a session shows is a question, so the pane that carries
   // the answer opens with it rather than waiting for a failure.
   revealDiagnostics();
+  terminal.focus();
 }
 
 async function startSession(): Promise<void> {
@@ -251,13 +222,18 @@ async function startSession(): Promise<void> {
   // in is what put a session in src-tauri (#20).
   const launching: TabConfig = { ...tab, cwd };
 
+  // Size the PTY to the terminal that will display it, so the CLI's first
+  // paint is not laid out for a window it does not have.
+  revealDiagnostics();
+  fitAddon.fit();
+
   startEl.disabled = true;
   status(`${tab.name} を起動しています…`);
   try {
     const started = await invoke<StartedSession>("start_session", {
       tab: launching,
-      cols: 120,
-      rows: 30,
+      cols: terminal.cols,
+      rows: terminal.rows,
     });
     tab.cwd = cwd;
     void invoke("save_config", { config: { tabs } }).catch(() => {
@@ -292,16 +268,58 @@ function renderSocket(port: number | null, error?: string): void {
   socketStateEl.dataset.kind = "ok";
 }
 
+function setUpTerminal(): void {
+  terminal.loadAddon(fitAddon);
+  terminal.open(terminalEl);
+
+  const style = getComputedStyle(document.documentElement);
+  terminal.options.theme = {
+    background: style.getPropertyValue("--bg").trim() || "#17171a",
+    foreground: style.getPropertyValue("--fg").trim() || "#e8e8ea",
+  };
+
+  terminal.onData((data) => {
+    if (activePtyId === null) return;
+    void invoke("write_pty", { id: activePtyId, data }).catch((err) => {
+      status(`セッションへ送れませんでした: ${err}`, "error");
+    });
+  });
+
+  // The webview does not deliver a native paste to xterm, so Ctrl+V is bridged
+  // explicitly. preventDefault stops the input arriving twice.
+  terminal.attachCustomKeyEventHandler((event) => {
+    const isPaste =
+      event.type === "keydown" &&
+      (event.ctrlKey || event.metaKey) &&
+      !event.altKey &&
+      (event.key === "v" || event.key === "V");
+    if (!isPaste) return true;
+
+    event.preventDefault();
+    void readText().then((text) => {
+      if (text && activePtyId !== null) void invoke("write_pty", { id: activePtyId, data: text });
+    });
+    return false;
+  });
+
+  new ResizeObserver(() => fitTerminal()).observe(terminalEl);
+}
+
 async function main(): Promise<void> {
+  setUpTerminal();
+
   nameEl.value = localStorage.getItem(NAME_KEY) ?? "human";
   nameEl.addEventListener("change", () => {
     localStorage.setItem(NAME_KEY, nameEl.value.trim() || "human");
   });
 
   toggleEl.addEventListener("click", () => {
-    const open = diagnosticsEl.hidden;
-    diagnosticsEl.hidden = !open;
-    toggleEl.setAttribute("aria-expanded", String(open));
+    if (diagnosticsEl.hidden) {
+      revealDiagnostics();
+    } else {
+      diagnosticsEl.hidden = true;
+      toggleEl.setAttribute("aria-expanded", "false");
+    }
   });
 
   await listen<RoomMessage>("room-message", (event) => appendMessage(event.payload));
@@ -318,20 +336,6 @@ async function main(): Promise<void> {
     }
   });
   startEl.addEventListener("click", () => void startSession());
-
-  sessionInputEl.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" || event.isComposing) return;
-    event.preventDefault();
-    const text = sessionInputEl.value;
-    sessionInputEl.value = "";
-    void sendToSession(text + KEYS.enter);
-  });
-  for (const key of keyEls) {
-    key.addEventListener("click", () => {
-      const sequence = KEYS[key.dataset.key ?? ""];
-      if (sequence) void sendToSession(sequence);
-    });
-  }
 
   let home = "";
   try {

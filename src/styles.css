@@ -194,7 +194,9 @@ body {
   background: var(--surface);
   padding: 0.6rem 0.9rem;
   font-size: 0.78rem;
-  max-height: 40vh;
+  /* The CLI is a full-screen TUI; a strip too short to hold its frame is not
+     worth opening. */
+  height: 50vh;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -223,21 +225,7 @@ body {
   color: var(--danger);
 }
 
-#session-log {
-  flex: 1;
-  min-height: 6rem;
-  overflow: auto;
-  margin: 0;
-  padding: 0.5rem;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
-  font-size: 0.72rem;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
+
 
 /* ── launcher ────────────────────────────────────────────────────────────── */
 
@@ -286,38 +274,20 @@ body {
   opacity: 0.6;
 }
 
-/* ── session keyboard ────────────────────────────────────────────────────── */
-
-#session-keys {
-  display: flex;
-  gap: 0.35rem;
-  align-items: center;
-}
-
-#session-input {
+#terminal {
   flex: 1;
-  font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
-  font-size: 0.75rem;
-  color: var(--fg);
-  background: var(--bg);
+  min-height: 18rem;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 4px;
-  padding: 0.3rem 0.45rem;
-}
-
-#session-keys .key {
-  font: inherit;
-  font-size: 0.72rem;
-  color: var(--fg);
+  padding: 0.35rem;
   background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 0.3rem 0.5rem;
-  cursor: pointer;
 }
 
-#session-keys .key:disabled,
-#session-input:disabled {
-  cursor: default;
-  opacity: 0.5;
+/* xterm sizes itself to the container, so the container must have a size of
+   its own rather than growing with the content. */
+#terminal .xterm,
+#terminal .xterm-viewport,
+#terminal .xterm-screen {
+  height: 100%;
 }
