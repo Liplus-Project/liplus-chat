@@ -40,6 +40,8 @@ pub fn run() {
             room::room_port,
             room::room_agents,
             room::room_say,
+            session::parse_launch_options,
+            session::preview_launch_args,
             session::start_session,
         ])
         .run(tauri::generate_context!())

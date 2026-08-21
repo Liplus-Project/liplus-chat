@@ -28,6 +28,19 @@
         <button id="start-session" type="button">セッション参加</button>
       </div>
 
+      <div id="launch-row">
+        <label class="options">
+          起動オプション
+          <input
+            id="launch-options"
+            type="text"
+            spellcheck="false"
+            placeholder="例: --dangerously-skip-permissions"
+          />
+        </label>
+        <span id="launch-preview" class="preview"></span>
+      </div>
+
       <main id="room" aria-live="polite"></main>
 
       <!-- Diagnostics, not the conversation surface. The room shows what was
