@@ -6,9 +6,14 @@
 //!
 //! Frames on the wire are the room protocol:
 //!
-//!   room    -> sidecar : { type: "say",   message_id, user, content, ts }
+//!   room    -> sidecar : { type: "say",   message_id, user, content, to?, ts }
 //!   sidecar -> room    : { type: "hello", protocol, agent }
 //!                        { type: "reply", message_id, agent, content, to?, ts }
+//!
+//! `to` is optional in both directions and carries the same vocabulary: the
+//! display name of the participant addressed. The room still fans every frame
+//! out to every sidecar — narrowing delivery here would make the room hold who
+//! heard what, and answering is the agent's judgment, not the room's.
 //!
 //! Everything the frontend needs arrives as a `room-message` event. The room
 //! never reads a CLI's terminal output; that is not a message source.
@@ -289,22 +294,34 @@ pub fn room_say(
     state: tauri::State<RoomState>,
     user: String,
     content: String,
+    to: Option<String>,
 ) -> Result<String, String> {
     let content = content.trim().to_string();
     if content.is_empty() {
         return Err("content is empty".to_string());
     }
 
+    // Absent is the key omitted, never an empty one: an agent matching `to`
+    // against its own name must not have to rule "" out first. Normalising
+    // here keeps that shape a property of the room rather than of its callers.
+    let to = to
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty());
+
     let message_id = Uuid::new_v4().to_string();
     let ts = now_iso();
 
-    let frame = serde_json::json!({
+    let mut frame = serde_json::json!({
         "type": "say",
         "message_id": message_id,
         "user": user,
         "content": content,
         "ts": ts,
     });
+    // Omitted rather than null when absent, matching the `reply` direction.
+    if let Some(name) = &to {
+        frame["to"] = serde_json::Value::String(name.clone());
+    }
 
     // No subscribers means no session has joined yet. That is not an error —
     // the room accepts what is said in it; a later joiner simply missed it.
@@ -317,7 +334,7 @@ pub fn room_say(
             kind: "human".to_string(),
             speaker: user,
             content,
-            to: None,
+            to,
             ts,
         },
     );

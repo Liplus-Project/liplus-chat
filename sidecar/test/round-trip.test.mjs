@@ -121,18 +121,20 @@ test("room say reaches the channel, and say_to_room reaches the room", async (t)
   function notify(method, params) {
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
   }
-  function nextNotification(method) {
-    const found = notifications.find((n) => n.method === method);
-    if (found) return Promise.resolve(found);
+  /** The `index`-th notification of `method`, awaited if it has not arrived. */
+  function nextNotification(method, index = 0) {
+    const matching = () => notifications.filter((n) => n.method === method);
+    if (matching().length > index) return Promise.resolve(matching()[index]);
     return withTimeout(
       new Promise((resolve) => {
-        const waiter = (msg) => {
-          if (msg.method === method) resolve(msg);
+        const waiter = () => {
+          const seen = matching();
+          if (seen.length > index) resolve(seen[index]);
           else notificationWaiters.push(waiter);
         };
         notificationWaiters.push(waiter);
       }),
-      method,
+      `${method} #${index}`,
     );
   }
 
@@ -151,6 +153,20 @@ test("room say reaches the channel, and say_to_room reaches the room", async (t)
     init.result.instructions ?? "",
     /say_to_room/,
     "instructions must name the reply tool",
+  );
+  // The manners and the material they are judged on ship together. Manners
+  // that say "answer what is addressed to you" without naming where the
+  // addressee is, or without naming what this agent is called, ask for a
+  // judgment the agent has nothing to make.
+  assert.match(
+    init.result.instructions ?? "",
+    /meta\.to/,
+    "instructions must name the addressee as judgment material",
+  );
+  assert.match(
+    init.result.instructions ?? "",
+    /test-agent/,
+    "instructions must tell the agent the name it answers to",
   );
 
   notify("notifications/initialized", {});
@@ -185,6 +201,47 @@ test("room say reaches the channel, and say_to_room reaches the room", async (t)
   assert.equal(pushed.params.meta.chat_id, "test-room");
   assert.equal(pushed.params.meta.message_id, "m-1");
   assert.equal(pushed.params.meta.user, "Master");
+  // An unaddressed utterance is the room as a whole. No key, rather than an
+  // empty one: an agent testing `meta.to` must not read "" as a name.
+  assert.equal(
+    "to" in pushed.params.meta,
+    false,
+    "an utterance with no addressee must carry no `to`",
+  );
+
+  // ── the addressee rides through to the agent ───────────────────────────────
+  roomSocket.send(
+    JSON.stringify({
+      type: "say",
+      message_id: "m-2",
+      user: "Master",
+      content: "リンだけ答えて",
+      to: "test-agent",
+      ts: "2026-08-21T00:00:01.000Z",
+    }),
+  );
+
+  const addressed = await nextNotification("notifications/claude/channel", 1);
+  // In meta, next to the speaker, for the same reason: the body stays equal to
+  // what was said.
+  assert.equal(addressed.params.content, "リンだけ答えて");
+  assert.equal(addressed.params.meta.to, "test-agent");
+
+  // Addressed elsewhere still arrives — the room delivers to everyone and the
+  // agent decides. Filtering here would put "who heard it" in the room.
+  roomSocket.send(
+    JSON.stringify({
+      type: "say",
+      message_id: "m-3",
+      user: "Master",
+      content: "レイはどう思う",
+      to: "other-agent",
+      ts: "2026-08-21T00:00:02.000Z",
+    }),
+  );
+
+  const elsewhere = await nextNotification("notifications/claude/channel", 2);
+  assert.equal(elsewhere.params.meta.to, "other-agent");
 
   // ── agent -> room ──────────────────────────────────────────────────────────
   const call = await request("tools/call", {

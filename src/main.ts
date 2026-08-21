@@ -54,6 +54,7 @@ const tabEl = document.getElementById("tab-select") as HTMLSelectElement;
 const startEl = document.getElementById("start-session") as HTMLButtonElement;
 const inputEl = document.getElementById("input") as HTMLTextAreaElement;
 const sendEl = document.getElementById("send") as HTMLButtonElement;
+const toEl = document.getElementById("to-select") as HTMLSelectElement;
 const statusEl = document.getElementById("status") as HTMLElement;
 const diagnosticsEl = document.getElementById("diagnostics") as HTMLElement;
 const toggleEl = document.getElementById("toggle-diagnostics") as HTMLButtonElement;
@@ -65,6 +66,8 @@ const optionsEl = document.getElementById("launch-options") as HTMLInputElement;
 const previewEl = document.getElementById("launch-preview") as HTMLElement;
 
 let tabs: TabConfig[] = [];
+/** Who is in the room, as the addressee list is drawn from. */
+let agents: string[] = [];
 /** The session the terminal is attached to, once one is running. */
 let activePtyId: string | null = null;
 
@@ -184,8 +187,38 @@ function appendMessage(message: RoomMessage): void {
   if (atBottom) roomEl.scrollTop = roomEl.scrollHeight;
 }
 
-function renderRoster(agents: string[]): void {
-  rosterEl.textContent = agents.length ? agents.join(" / ") : "参加者なし";
+function renderRoster(joined: string[]): void {
+  agents = joined;
+  rosterEl.textContent = joined.length ? joined.join(" / ") : "参加者なし";
+  renderAddressees();
+}
+
+/**
+ * Redraw the addressee list from the roster.
+ *
+ * The names have to be the ones the agents answer to, so they come from the
+ * roster rather than being typed: a mistyped addressee is an utterance
+ * addressed to nobody, and nothing on screen would say so. A chosen addressee
+ * survives a roster change while that participant is still present, and falls
+ * back to the whole room when they leave.
+ */
+function renderAddressees(): void {
+  const chosen = toEl.value;
+  toEl.replaceChildren();
+
+  const everyone = document.createElement("option");
+  everyone.value = "";
+  everyone.textContent = "全体";
+  toEl.appendChild(everyone);
+
+  for (const agent of agents) {
+    const option = document.createElement("option");
+    option.value = agent;
+    option.textContent = agent;
+    toEl.appendChild(option);
+  }
+
+  toEl.value = agents.includes(chosen) ? chosen : "";
 }
 
 async function send(): Promise<void> {
@@ -193,9 +226,12 @@ async function send(): Promise<void> {
   if (!content) return;
 
   const user = nameEl.value.trim() || "human";
+  // Empty means the room as a whole. The app still delivers to everyone; the
+  // addressee is judgment material for the agents, not a delivery filter.
+  const to = toEl.value || null;
   inputEl.value = "";
   try {
-    await invoke<string>("room_say", { user, content });
+    await invoke<string>("room_say", { user, content, to });
     status("");
   } catch (err) {
     // Put the text back rather than losing what was typed.

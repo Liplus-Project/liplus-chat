@@ -44,10 +44,15 @@ function log(line: string): void {
 // ── Room frames ──────────────────────────────────────────────────────────────
 //
 // Room -> sidecar:
-//   { type: "say",   message_id, user, content, ts }
+//   { type: "say",   message_id, user, content, to?, ts }
 // Sidecar -> room:
 //   { type: "hello", protocol, agent }
 //   { type: "reply", message_id, agent, content, to?, ts }
+//
+// `to` is optional in both directions and means the same thing on each: the
+// display name of the participant addressed. The room fans every frame out to
+// everyone regardless — whether an utterance is yours to answer is decided
+// here, by the agent, not by the room narrowing its delivery.
 //
 // Frames whose `type` is unknown are ignored rather than rejected, so the room
 // can add frame kinds without breaking a sidecar built against this revision.
@@ -57,6 +62,7 @@ interface SayFrame {
   message_id?: string;
   user?: string;
   content?: string;
+  to?: string;
   ts?: string;
 }
 
@@ -64,14 +70,22 @@ interface SayFrame {
 
 const INSTRUCTIONS = [
   "あなたは liplus-chat の部屋に参加しています。",
+  `この部屋でのあなたの名前は「${AGENT_NAME}」です。`,
   "",
   '部屋の発言は <channel source="liplus-chat" ...> として届きます。',
   "返信するときは say_to_room ツールを呼んでください。ターミナルへの出力は",
   "部屋には届きません。",
   "",
+  "宛先:",
+  "- 発言には宛先が付くことがあります。宛先は meta.to に入っています。",
+  `- meta.to が「${AGENT_NAME}」なら、あなた宛です。答えてください。`,
+  "- meta.to が他の参加者の名前なら、あなた宛ではありません。黙ってください。",
+  "  補足したくなっても割り込まないでください。",
+  "- meta.to が無い発言は部屋全体宛です。自分が答えるべきときだけ答えてください。",
+  "- say_to_room の to 引数で、こちらからも宛先を指定できます。",
+  "",
   "部屋の作法:",
-  "- 自分に向けられた発言、または自分が答えるべき発言にだけ返信してください。",
-  "- 他の参加者への発言に割り込まないでください。返信しない判断は正当です。",
+  "- 返信しない判断は正当です。全員が答えると部屋は読めなくなります。",
   "- 一度の発言は簡潔に。長い説明が必要なときは、まず要点だけ返してください。",
   "- 他の参加者の発言を、自分の文脈として取り込まないでください。それぞれが",
   "  自分の文脈から同じ会話に参加しています。",
@@ -193,6 +207,10 @@ function pushToChannel(frame: SayFrame): void {
   if (!content) return;
 
   const user = frame.user ?? "someone";
+  // The addressee rides in meta for the same reason the speaker does: the body
+  // must stay equal to what was said. It is judgment material, not text — the
+  // instructions tell the agent to read it and decide whether to answer.
+  const to = typeof frame.to === "string" && frame.to ? frame.to : undefined;
   void mcp.notification({
     method: "notifications/claude/channel",
     params: {
@@ -204,6 +222,7 @@ function pushToChannel(frame: SayFrame): void {
         chat_id: CHAT_ID,
         message_id: frame.message_id ?? randomUUID(),
         user,
+        ...(to ? { to } : {}),
         ts: frame.ts ?? new Date().toISOString(),
       },
     },
