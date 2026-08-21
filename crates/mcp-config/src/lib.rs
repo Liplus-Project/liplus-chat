@@ -56,11 +56,70 @@ pub fn reject_incompatible_flags(args: &[String]) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// The flag that loads channel servers into a session.
+pub const CHANNEL_FLAG: &str = "--dangerously-load-development-channels";
+
 /// The launch arguments for a channel-enabled session, given the tab's own.
+///
+/// The room's entry is merged into whatever the person wrote rather than added
+/// as a second flag: `--channels` alongside this one registers a server twice
+/// and takes the whole room down, and two copies of this flag is the same
+/// shape. Merging also means the room's input path cannot be dropped by
+/// configuring a different server — losing it is losing the room.
 pub fn channel_launch_args(base: &[String]) -> Vec<String> {
+    let room = format!("server:{SERVER_NAME}");
     let mut args = base.to_vec();
-    args.push("--dangerously-load-development-channels".to_string());
-    args.push(format!("server:{SERVER_NAME}"));
+
+    if args.iter().any(|arg| *arg == room) {
+        return args;
+    }
+
+    match args.iter().position(|arg| arg == CHANNEL_FLAG) {
+        // Right after the flag: the values are positional, and keeping them
+        // contiguous means a later argument cannot be captured as one.
+        Some(index) => args.insert(index + 1, room),
+        None => {
+            args.push(CHANNEL_FLAG.to_string());
+            args.push(room);
+        }
+    }
+    args
+}
+
+/// Split a launch-options string the way a shell would, minus the parts a
+/// shell does that have no place here.
+///
+/// Double quotes group, because Windows paths have spaces in them and a bare
+/// whitespace split turns one such argument into two without saying so.
+/// Nothing else is interpreted: no variable expansion, no globbing, no escape
+/// characters — a backslash in a Windows path is a backslash.
+pub fn split_launch_options(text: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    let mut has_token = false;
+
+    for ch in text.chars() {
+        match ch {
+            '"' => {
+                quoted = !quoted;
+                has_token = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if has_token {
+                    args.push(std::mem::take(&mut current));
+                    has_token = false;
+                }
+            }
+            c => {
+                current.push(c);
+                has_token = true;
+            }
+        }
+    }
+    if has_token {
+        args.push(current);
+    }
     args
 }
 
@@ -290,6 +349,67 @@ mod tests {
     fn accepts_arguments_that_do_not_touch_that_axis() {
         let args = vec!["--verbose".to_string(), "--model=opus".to_string()];
         assert_eq!(reject_incompatible_flags(&args), Ok(()));
+    }
+
+    #[test]
+    fn merges_the_room_into_a_channel_flag_the_person_already_wrote() {
+        // Master's own launch line, which names a different channel server.
+        // A second copy of the flag is the `--channels` failure in another
+        // shape, and dropping the room entry loses the room's input path.
+        let base: Vec<String> = [
+            "--dangerously-skip-permissions",
+            CHANNEL_FLAG,
+            "server:github-webhook-mcp",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+        let merged = channel_launch_args(&base);
+        assert_eq!(
+            merged,
+            vec![
+                "--dangerously-skip-permissions".to_string(),
+                CHANNEL_FLAG.to_string(),
+                format!("server:{SERVER_NAME}"),
+                "server:github-webhook-mcp".to_string(),
+            ]
+        );
+        assert_eq!(
+            merged.iter().filter(|arg| *arg == CHANNEL_FLAG).count(),
+            1,
+            "the flag must not appear twice"
+        );
+    }
+
+    #[test]
+    fn does_not_add_the_room_twice() {
+        let base = vec![CHANNEL_FLAG.to_string(), format!("server:{SERVER_NAME}")];
+        assert_eq!(channel_launch_args(&base), base);
+    }
+
+    #[test]
+    fn splits_launch_options_keeping_quoted_arguments_whole() {
+        assert_eq!(
+            split_launch_options("  --a   --b=1  "),
+            vec!["--a".to_string(), "--b=1".to_string()]
+        );
+        // A Windows path with spaces is one argument, and its backslashes are
+        // literal rather than escapes.
+        assert_eq!(
+            split_launch_options(r#"--add-dir "C:\Program Files\x" --flag"#),
+            vec![
+                "--add-dir".to_string(),
+                r"C:\Program Files\x".to_string(),
+                "--flag".to_string(),
+            ]
+        );
+        assert!(split_launch_options("   ").is_empty());
+        // An empty quoted argument is an argument, not nothing.
+        assert_eq!(
+            split_launch_options("--x \"\""),
+            vec!["--x".to_string(), String::new()]
+        );
     }
 
     #[test]

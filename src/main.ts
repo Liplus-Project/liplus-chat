@@ -61,6 +61,8 @@ const socketStateEl = document.getElementById("socket-state") as HTMLElement;
 const sessionStateEl = document.getElementById("session-state") as HTMLElement;
 const terminalEl = document.getElementById("terminal") as HTMLElement;
 const cwdEl = document.getElementById("session-cwd") as HTMLInputElement;
+const optionsEl = document.getElementById("launch-options") as HTMLInputElement;
+const previewEl = document.getElementById("launch-preview") as HTMLElement;
 
 let tabs: TabConfig[] = [];
 /** The session the terminal is attached to, once one is running. */
@@ -106,6 +108,33 @@ function fitTerminal(): void {
     }).catch(() => {
       // The session may have exited between the fit and the call.
     });
+  }
+}
+
+/** Render saved arguments back into an editable line. */
+function joinArgs(args: string[]): string {
+  return args.map((arg) => (arg === "" || arg.includes(" ") ? `"${arg}"` : arg)).join(" ");
+}
+
+/**
+ * Show the command that will actually run.
+ *
+ * The app merges its own channel entry into whatever is typed here, so the
+ * line the person wrote is not the line that launches. Showing the result is
+ * cheaper than explaining the merge.
+ */
+async function refreshPreview(): Promise<void> {
+  const tab = tabs.find((candidate) => candidate.id === tabEl.value);
+  if (!tab) {
+    previewEl.textContent = "";
+    return;
+  }
+  try {
+    const parsed = await invoke<string[]>("parse_launch_options", { text: optionsEl.value });
+    const merged = await invoke<string[]>("preview_launch_args", { args: parsed });
+    previewEl.textContent = `${tab.command} ${joinArgs(merged)}`;
+  } catch {
+    previewEl.textContent = "";
   }
 }
 
@@ -220,7 +249,8 @@ async function startSession(): Promise<void> {
   // The directory is the person's choice, so it is carried on the tab and
   // saved. Falling back to whatever directory the app process happens to sit
   // in is what put a session in src-tauri (#20).
-  const launching: TabConfig = { ...tab, cwd };
+  const args = await invoke<string[]>("parse_launch_options", { text: optionsEl.value });
+  const launching: TabConfig = { ...tab, cwd, args };
 
   // Size the PTY to the terminal that will display it, so the CLI's first
   // paint is not laid out for a window it does not have.
@@ -236,6 +266,7 @@ async function startSession(): Promise<void> {
       rows: terminal.rows,
     });
     tab.cwd = cwd;
+    tab.args = args;
     void invoke("save_config", { config: { tabs } }).catch(() => {
       // A directory that fails to persist is worth one line, not a failed
       // launch: the session is already up.
@@ -344,10 +375,13 @@ async function main(): Promise<void> {
     // Only the prefill is lost; the field is still typed into by hand.
   }
 
-  const showCwd = (): void => {
+  const showTab = (): void => {
     const tab = tabs.find((candidate) => candidate.id === tabEl.value);
     cwdEl.value = tab?.cwd ?? home;
+    optionsEl.value = joinArgs(tab?.args ?? []);
+    void refreshPreview();
   };
+  optionsEl.addEventListener("input", () => void refreshPreview());
 
   try {
     const config = await invoke<AppConfig>("load_config");
@@ -358,8 +392,8 @@ async function main(): Promise<void> {
       option.textContent = tab.name;
       tabEl.appendChild(option);
     }
-    showCwd();
-    tabEl.addEventListener("change", showCwd);
+    showTab();
+    tabEl.addEventListener("change", showTab);
   } catch (err) {
     status(`設定を読み込めませんでした: ${err}`, "error");
   }

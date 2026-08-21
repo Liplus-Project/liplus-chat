@@ -69,6 +69,25 @@ fn resolve_sidecar_paths() -> Result<(PathBuf, PathBuf), String> {
         .to_string())
 }
 
+/// Split a launch-options string into arguments.
+///
+/// The splitter lives in `mcp-config` so it is covered by tests; this is the
+/// door the frontend reaches it through, rather than a second implementation
+/// in TypeScript that would drift from the tested one.
+#[tauri::command]
+pub fn parse_launch_options(text: String) -> Vec<String> {
+    mcp_config::split_launch_options(&text)
+}
+
+/// The arguments a launch would actually use, for display.
+///
+/// The app merges its own channel entry into what the person wrote, so the
+/// line they typed is not the line that runs. This returns the line that runs.
+#[tauri::command]
+pub fn preview_launch_args(args: Vec<String>) -> Vec<String> {
+    channel_launch_args(&args)
+}
+
 /// What the caller gets back after a session joins.
 #[derive(Debug, serde::Serialize)]
 pub struct StartedSession {

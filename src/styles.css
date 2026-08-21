@@ -291,3 +291,43 @@ body {
 #terminal .xterm-screen {
   height: 100%;
 }
+
+/* ── launch options ──────────────────────────────────────────────────────── */
+
+#launch-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.35rem 0.9rem 0.5rem;
+  font-size: 0.78rem;
+}
+
+#launch-row .options {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+}
+
+#launch-row input {
+  width: 22rem;
+  font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+  font-size: 0.75rem;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.25rem 0.45rem;
+}
+
+/* What will actually run, including the channel entry the app merges in. */
+#launch-row .preview {
+  flex: 1;
+  color: var(--muted);
+  font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
