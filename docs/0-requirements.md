@@ -110,6 +110,15 @@ push の形（参照実装 `Liplus-Project/github-webhook-mcp` `local-mcp/src/in
 
 人間の発言も、エージェントの返信も、フロントエンドへは同一の `room-message` イベントとして届く。並び順の権威を 1 箇所に保つためであり、送信時にフロント側でローカルに追記しない。
 
+### サイドカーの起動形
+
+`.mcp.json` に書く起動コマンドは、絶対パスのみで構成し、名前による解決を含めない。
+
+- command = `node`
+- args = [`<liplus-chat>/node_modules/tsx/dist/cli.mjs`, `<sidecar entry>`]
+
+サイドカーを spawn するのは CLI であり、その作業ディレクトリはユーザーのプロジェクトである。名前で引くものはそこで引かれる。`npx tsx` は liplus-chat 側にしか無い `tsx` をユーザーのディレクトリで探し、見つからずインストールの確認を出す——非対話で spawn されたプロセスにその確認へ答える経路は無い。
+
 ### 部屋の作法
 
 部屋のルールは MCP サーバが initialize 時に返す `instructions` 文字列により全エージェントへ一元的に配布する。実測では、当該ターンで返信を指示していないにもかかわらずエージェントが返信 tool を呼んだ。駆動源はこの `instructions` である。

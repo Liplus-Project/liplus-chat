@@ -36,6 +36,8 @@ pub struct RoomRegistration<'a> {
     pub agent_name: &'a str,
     /// Absolute path of the sidecar entry point.
     pub sidecar_entry: &'a Path,
+    /// Absolute path of the TypeScript runner that executes the entry point.
+    pub sidecar_runner: &'a Path,
 }
 
 /// Reject a launch whose flags would leave the session unable to hear the room.
@@ -64,21 +66,19 @@ pub fn channel_launch_args(base: &[String]) -> Vec<String> {
 
 /// How the CLI should spawn the sidecar, as a `.mcp.json` command and args.
 ///
-/// npx resolves through PATHEXT on Windows only when a shell runs it.
-fn spawn_form(entry: &str) -> (&'static str, Vec<String>) {
-    if cfg!(windows) {
-        (
-            "cmd",
-            vec![
-                "/c".to_string(),
-                "npx".to_string(),
-                "tsx".to_string(),
-                entry.to_string(),
-            ],
-        )
-    } else {
-        ("npx", vec!["tsx".to_string(), entry.to_string()])
-    }
+/// Absolute paths and nothing to resolve. The CLI spawns this from the user's
+/// own project directory, so anything looked up by name is looked up there:
+/// `npx tsx` searched for a package that lives in liplus-chat and asked to
+/// install it, from a process with no way to answer (#22). `node` is an
+/// executable rather than a shell script, so no shell wrapper is needed either.
+fn spawn_form(runner: &Path, entry: &Path) -> (&'static str, Vec<String>) {
+    (
+        "node",
+        vec![
+            runner.to_string_lossy().to_string(),
+            entry.to_string_lossy().to_string(),
+        ],
+    )
 }
 
 /// Merge the room server into the `.mcp.json` at `dir`, preserving whatever
@@ -88,8 +88,7 @@ fn spawn_form(entry: &str) -> (&'static str, Vec<String>) {
 /// where a Claude Code MCP server is normally registered. Only this one key is
 /// touched; existing servers and unrelated top-level keys survive verbatim.
 pub fn register_sidecar(dir: &Path, room: &RoomRegistration<'_>) -> Result<PathBuf, String> {
-    let entry = room.sidecar_entry.to_string_lossy().to_string();
-    let (command, args) = spawn_form(&entry);
+    let (command, args) = spawn_form(room.sidecar_runner, room.sidecar_entry);
 
     let path = dir.join(".mcp.json");
     let mut root: Value = if path.exists() {
@@ -162,12 +161,16 @@ mod tests {
         }
     }
 
-    fn registration<'a>(entry: &'a Path) -> RoomRegistration<'a> {
+    const ENTRY: &str = "C:/liplus-chat/sidecar/src/index.ts";
+    const RUNNER: &str = "C:/liplus-chat/node_modules/tsx/dist/cli.mjs";
+
+    fn registration<'a>(entry: &'a Path, runner: &'a Path) -> RoomRegistration<'a> {
         RoomRegistration {
             room_url: "ws://127.0.0.1:1234",
             token: "tok",
             agent_name: "Lin",
             sidecar_entry: entry,
+            sidecar_runner: runner,
         }
     }
 
@@ -178,8 +181,10 @@ mod tests {
     #[test]
     fn registers_the_room_server_when_no_config_exists() {
         let scratch = Scratch::new();
-        let entry = PathBuf::from("sidecar/src/index.ts");
-        let path = register_sidecar(scratch.path(), &registration(&entry)).expect("register");
+        let entry = PathBuf::from(ENTRY);
+        let runner = PathBuf::from(RUNNER);
+        let path =
+            register_sidecar(scratch.path(), &registration(&entry, &runner)).expect("register");
 
         let json = read(&path);
         let server = &json["mcpServers"][SERVER_NAME];
@@ -188,9 +193,17 @@ mod tests {
         assert_eq!(server["env"]["LIPLUS_AGENT_NAME"], "Lin");
         assert_eq!(server["env"]["LIPLUS_ROOM_ID"], "liplus-chat");
 
-        let args = server["args"].as_array().expect("args");
-        let last = args.last().expect("entry argument");
-        assert_eq!(last, "sidecar/src/index.ts");
+        // Absolute paths and nothing looked up by name: the CLI runs this from
+        // the user's own directory, where `npx tsx` found no tsx and asked to
+        // install one (#22).
+        assert_eq!(server["command"], "node");
+        assert_eq!(
+            server["args"].as_array().expect("args"),
+            &vec![
+                Value::String(RUNNER.to_string()),
+                Value::String(ENTRY.to_string()),
+            ]
+        );
     }
 
     #[test]
@@ -204,8 +217,10 @@ mod tests {
         )
         .expect("seed");
 
-        let entry = PathBuf::from("sidecar/src/index.ts");
-        let path = register_sidecar(scratch.path(), &registration(&entry)).expect("register");
+        let entry = PathBuf::from(ENTRY);
+        let runner = PathBuf::from(RUNNER);
+        let path =
+            register_sidecar(scratch.path(), &registration(&entry, &runner)).expect("register");
 
         let json = read(&path);
         assert_eq!(json["mcpServers"]["theirs"]["command"], "their-server");
@@ -216,14 +231,16 @@ mod tests {
     #[test]
     fn re_registering_replaces_only_its_own_entry() {
         let scratch = Scratch::new();
-        let entry = PathBuf::from("sidecar/src/index.ts");
+        let entry = PathBuf::from(ENTRY);
+        let runner = PathBuf::from(RUNNER);
 
-        register_sidecar(scratch.path(), &registration(&entry)).expect("first");
+        register_sidecar(scratch.path(), &registration(&entry, &runner)).expect("first");
         let second = RoomRegistration {
             room_url: "ws://127.0.0.1:9999",
             token: "tok2",
             agent_name: "Lay",
             sidecar_entry: &entry,
+            sidecar_runner: &runner,
         };
         let path = register_sidecar(scratch.path(), &second).expect("second");
 
@@ -244,8 +261,9 @@ mod tests {
         let seeded = "{ not json";
         std::fs::write(scratch.path().join(".mcp.json"), seeded).expect("seed");
 
-        let entry = PathBuf::from("sidecar/src/index.ts");
-        let err = register_sidecar(scratch.path(), &registration(&entry)).unwrap_err();
+        let entry = PathBuf::from(ENTRY);
+        let runner = PathBuf::from(RUNNER);
+        let err = register_sidecar(scratch.path(), &registration(&entry, &runner)).unwrap_err();
         assert!(err.contains("not valid JSON"), "unexpected error: {err}");
         assert_eq!(
             std::fs::read_to_string(scratch.path().join(".mcp.json")).expect("read"),
