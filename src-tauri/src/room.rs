@@ -155,6 +155,11 @@ pub async fn start(app: AppHandle, room: RoomState) -> Result<u16, String> {
         .port();
     room.set_port(port);
 
+    // The frontend loads before this bind completes, so a poll at load time
+    // reads "not listening" and reports a failure that is only a race. The
+    // event is the authority; `room_port` remains for a late reader.
+    let _ = app.emit("room-ready", port);
+
     tokio::spawn(async move {
         loop {
             let Ok((stream, _)) = listener.accept().await else {
