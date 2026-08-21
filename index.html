@@ -11,8 +11,27 @@
     <div id="app">
       <header id="titlebar">
         <span class="title">Li+ Chat</span>
+        <span id="roster" class="roster">参加者なし</span>
+        <label class="who">
+          名前
+          <input id="display-name" type="text" value="human" spellcheck="false" />
+        </label>
+        <select id="tab-select" aria-label="起動するセッション"></select>
+        <button id="start-session" type="button">セッション参加</button>
       </header>
-      <main id="room"></main>
+
+      <main id="room" aria-live="polite"></main>
+
+      <footer id="composer">
+        <textarea
+          id="input"
+          rows="2"
+          placeholder="部屋に発言する（Enter で送信 / Shift+Enter で改行）"
+        ></textarea>
+        <button id="send" type="button">送信</button>
+      </footer>
+
+      <div id="status" role="status"></div>
     </div>
   </body>
 </html>
