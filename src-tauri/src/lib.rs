@@ -1,7 +1,11 @@
 mod config;
 mod pty;
+mod room;
+mod session;
 
 use pty::PtyState;
+use room::RoomState;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -9,6 +13,20 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(PtyState::new())
+        .manage(RoomState::new())
+        .setup(|app| {
+            // The room has to be listening before any session is started: the
+            // port goes into the `.mcp.json` a session launch writes.
+            let handle = app.handle().clone();
+            let state = handle.state::<RoomState>().inner().clone();
+            tauri::async_runtime::spawn(async move {
+                match room::start(handle, state).await {
+                    Ok(port) => eprintln!("[room] listening on 127.0.0.1:{port}"),
+                    Err(err) => eprintln!("[room] failed to start: {err}"),
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             pty::spawn_pty,
             pty::write_pty,
@@ -18,6 +36,10 @@ pub fn run() {
             config::save_config,
             config::save_sessions,
             config::load_sessions,
+            room::room_port,
+            room::room_agents,
+            room::room_say,
+            session::start_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
