@@ -39,9 +39,22 @@ jobs:
 
       - run: npm ci
 
+      - name: Type-check and build the frontend
+        run: npm run build
+
+      - name: Type-check the sidecar
+        run: npm run sidecar:check
+
+      - name: Test the sidecar round trip
+        run: npm run sidecar:test
+
       - name: Check Rust compilation
         working-directory: src-tauri
         run: cargo check --target x86_64-pc-windows-gnu
+
+      - name: Test Rust
+        working-directory: src-tauri
+        run: cargo test --lib --target x86_64-pc-windows-gnu
 
   # Gate job: single Required status check for branch protection.
   # Add new jobs to `needs` when CI grows. No Settings change needed.
