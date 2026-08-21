@@ -29,6 +29,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             src-tauri/target
+            crates/mcp-config/target
           key: rust-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
           restore-keys: rust-${{ runner.os }}-
 
@@ -52,9 +53,13 @@ jobs:
         working-directory: src-tauri
         run: cargo check --target x86_64-pc-windows-gnu
 
-      - name: Test Rust
-        working-directory: src-tauri
-        run: cargo test --lib --target x86_64-pc-windows-gnu
+      # Not in src-tauri: a test binary that links the tauri dependency tree
+      # does not load on the GNU target (STATUS_ENTRYPOINT_NOT_FOUND). The
+      # logic that most needs covering lives in a tauri-free crate for that
+      # reason. See docs/0-requirements.md.
+      - name: Test the mcp-config crate
+        working-directory: crates/mcp-config
+        run: cargo test
 
   # Gate job: single Required status check for branch protection.
   # Add new jobs to `needs` when CI grows. No Settings change needed.

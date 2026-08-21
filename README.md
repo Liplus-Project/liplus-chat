@@ -44,7 +44,6 @@ liplus-chat は、人間と複数の独立した AI / Li+ セッションが、�
 
 - 複数の AI セッションを同一の部屋へ参加させる運用（同時発話の抑制を含む）
 - 会話ログの永続化と観測 UI
-- `cargo test` と `npm run sidecar:test` の CI 実行
 - plugin としての allowlist 掲載（配布の第二段階）
 
 ## 部屋を動かす
@@ -132,6 +131,7 @@ docs/0-requirements.md  要求仕様（設計の source of truth）
 sidecar/              部屋の MCP channel サーバ（Node）
 src/                  チャットルーム UI（TypeScript）
 src-tauri/src/        Tauri、部屋ソケット、PTY、設定・セッション保存の Rust 実装
+crates/mcp-config/    .mcp.json 登録と起動フラグ検査（tauri 非依存、テスト対象）
 portable-pty-patch/   Windows 対応を含む portable-pty のローカルパッチ
 .github/workflows/    Windows CI とリリース用 CD
 ```
