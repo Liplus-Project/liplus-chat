@@ -18,9 +18,23 @@
         </label>
         <select id="tab-select" aria-label="起動するセッション"></select>
         <button id="start-session" type="button">セッション参加</button>
+        <button id="toggle-diagnostics" type="button" aria-expanded="false">診断</button>
       </header>
 
       <main id="room" aria-live="polite"></main>
+
+      <!-- Diagnostics, not the conversation surface. The room shows messages;
+           this shows whether the machinery under it is alive. Collapsed by
+           default so it does not compete with the room. -->
+      <aside id="diagnostics" hidden>
+        <dl class="facts">
+          <dt>部屋ソケット</dt>
+          <dd id="socket-state">確認中</dd>
+          <dt>セッション</dt>
+          <dd id="session-state">未起動</dd>
+        </dl>
+        <pre id="session-log" aria-label="セッションの出力"></pre>
+      </aside>
 
       <footer id="composer">
         <textarea

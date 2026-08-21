@@ -183,3 +183,58 @@ body {
 #status[data-kind="error"] {
   color: var(--danger);
 }
+
+/* ── diagnostics ─────────────────────────────────────────────────────────── */
+
+/* Not the conversation surface. The room answers "what was said"; this answers
+   "is anything under the room alive", which is the question a silent room
+   leaves unanswerable. */
+#diagnostics {
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  padding: 0.6rem 0.9rem;
+  font-size: 0.78rem;
+  max-height: 40vh;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+#diagnostics .facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 0.75rem;
+  margin: 0;
+}
+
+#diagnostics dt {
+  color: var(--muted);
+}
+
+#diagnostics dd {
+  margin: 0;
+}
+
+#diagnostics dd[data-kind="ok"] {
+  color: var(--accent);
+}
+
+#diagnostics dd[data-kind="error"] {
+  color: var(--danger);
+}
+
+#session-log {
+  flex: 1;
+  min-height: 6rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.5rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
