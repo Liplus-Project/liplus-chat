@@ -1,7 +1,7 @@
 # liplus-chat
 
 > [!IMPORTANT]
-> このリポジトリは現在、アプリケーション基盤のスキャフォールド段階です。チャットルーム UI と Channels / MCP 連携はまだ実装されていません。
+> 部屋の一往復（人間の発言 → channel → セッションの返信 → 部屋への表示）は実装済みですが、実機での往復は未検証です。配布は開発者環境向けの第一段階のみで、起動時に警告バナーが出ます。
 
 ## 概要
 
@@ -24,22 +24,53 @@ liplus-chat は、人間と複数の独立した AI / Li+ セッションが、�
 ### 実装済み
 
 - Tauri 2 による Windows デスクトップアプリの基盤
-- Vite と TypeScript による最小のフロントエンド
 - プロセスの起動、入力、リサイズ、終了を扱う Rust の PTY コマンド
 - タブ設定とセッションデータを JSON へ保存・読込する Tauri コマンド
-- Claude Code と Codex を想定した既定タブ設定
+- MCP channel サーバ（Node サイドカー、`sidecar/`）
+- 部屋ソケット（`127.0.0.1` の任意ポート、Bearer トークン必須）
+- `.mcp.json` への登録と、channel が成立する条件を満たした CLI 起動
+- メッセージ一覧・発言者表示・入力欄を備えたチャットルーム UI
 - Windows 上で `npm ci` と Rust のコンパイル確認を行う CI
 - GitHub Release 公開時に Tauri バンドルを作成する CD
 
-現時点の画面は、スキャフォールドであることを表示するプレースホルダーです。Rust 側の PTY・設定・セッション保存機能は存在しますが、フロントエンドからチャットルームとして利用できる状態にはまだ接続されていません。
+### 未検証
+
+コンパイルと自動テストは通っていますが、実機での往復は未確認です。
+
+- 実際の CLI セッションが部屋へ参加し、1 往復が成立すること
+- 往復の所要時間
 
 ### 未実装
 
-- メッセージ一覧、発言者表示、入力欄を備えたチャットルーム UI
-- フロントエンドと PTY コマンドの接続
-- Channels / MCP による通知受信と返信
-- 複数の AI / Li+ セッションを共通の会話へ参加させる連携
-- 予期しない相互作用を追跡するための会話ログと観測 UI
+- 複数の AI セッションを同一の部屋へ参加させる運用（同時発話の抑制を含む）
+- 会話ログの永続化と観測 UI
+- `cargo test` と `npm run sidecar:test` の CI 実行
+- plugin としての allowlist 掲載（配布の第二段階）
+
+## 部屋を動かす
+
+```powershell
+npm run tauri dev
+```
+
+起動すると部屋ソケットが待ち受けを始めます。タイトルバーでセッションを選び「セッション参加」を押すと、次の 2 つが行われます。
+
+1. そのタブの作業ディレクトリの `.mcp.json` へ、部屋のサイドカーを `liplus-chat-room` という名前で登録します。**既存の内容はマージして保持します**が、あなたのリポジトリのファイルを書き換える操作です。
+2. `--dangerously-load-development-channels server:liplus-chat-room` を付けて CLI を PTY 上の対話セッションとして起動します。
+
+> [!NOTE]
+> このフラグはローカルの channel 開発専用であり、起動ごとに警告バナーが出ます。一般配布には plugin として allowlist に載せる必要があり、そちらは未対応です。
+
+入力欄から発言すると channel notification としてセッションへ届き、セッションが `say_to_room` を呼び返すとメッセージ一覧へ並びます。往復が成立しないときの切り分け手順は [`docs/0-requirements.md`](docs/0-requirements.md) を参照してください。
+
+### サイドカー単体の確認
+
+```powershell
+npm run sidecar:check
+npm run sidecar:test
+```
+
+`sidecar:test` は偽の部屋ソケットを立てて MCP と WebSocket の両面を駆動します。これが通れば、切り分けの対象をアプリ側へ絞れます。
 
 ## Windows での開発
 
@@ -98,8 +129,9 @@ MinGW のツールが、空白を含むビルド出力パスを扱えない場�
 
 ```text
 docs/0-requirements.md  要求仕様（設計の source of truth）
-src/                  最小の TypeScript フロントエンド
-src-tauri/src/        Tauri、PTY、設定・セッション保存の Rust 実装
+sidecar/              部屋の MCP channel サーバ（Node）
+src/                  チャットルーム UI（TypeScript）
+src-tauri/src/        Tauri、部屋ソケット、PTY、設定・セッション保存の Rust 実装
 portable-pty-patch/   Windows 対応を含む portable-pty のローカルパッチ
 .github/workflows/    Windows CI とリリース用 CD
 ```
