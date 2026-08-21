@@ -15,32 +15,58 @@ use mcp_config::{channel_launch_args, register_sidecar, reject_incompatible_flag
 use std::path::PathBuf;
 use tauri::AppHandle;
 
-/// Where the sidecar entry point lives.
+/// The sidecar entry point and the runner that executes it.
+///
+/// Both come from one walk, and both are absolute. The CLI spawns the sidecar
+/// from the user's own project directory, so a path resolved by name there
+/// resolves against their tree, not ours (#22).
 ///
 /// Stage-one distribution runs from the repository, so the walk up from the
-/// working directory is the normal path; the env override exists for a layout
+/// working directory is the normal path; the env overrides exist for a layout
 /// this does not predict.
-fn resolve_sidecar_entry() -> Result<PathBuf, String> {
-    if let Ok(explicit) = std::env::var("LIPLUS_SIDECAR_ENTRY") {
-        let path = PathBuf::from(&explicit);
-        if path.is_file() {
-            return Ok(path);
+fn resolve_sidecar_paths() -> Result<(PathBuf, PathBuf), String> {
+    fn from_env(key: &str) -> Result<Option<PathBuf>, String> {
+        match std::env::var(key) {
+            Err(_) => Ok(None),
+            Ok(value) => {
+                let path = PathBuf::from(&value);
+                if path.is_file() {
+                    Ok(Some(path))
+                } else {
+                    Err(format!("{key} points at a missing file: {value}"))
+                }
+            }
         }
-        return Err(format!("LIPLUS_SIDECAR_ENTRY points at a missing file: {explicit}"));
+    }
+
+    let entry_override = from_env("LIPLUS_SIDECAR_ENTRY")?;
+    let runner_override = from_env("LIPLUS_SIDECAR_RUNNER")?;
+    if let (Some(entry), Some(runner)) = (&entry_override, &runner_override) {
+        return Ok((entry.clone(), runner.clone()));
     }
 
     let mut dir = std::env::current_dir()
         .map_err(|e| format!("Failed to resolve the working directory: {e}"))?;
     for _ in 0..4 {
-        let candidate = dir.join("sidecar").join("src").join("index.ts");
-        if candidate.is_file() {
-            return Ok(candidate);
+        let entry = dir.join("sidecar").join("src").join("index.ts");
+        let runner = dir
+            .join("node_modules")
+            .join("tsx")
+            .join("dist")
+            .join("cli.mjs");
+        if entry.is_file() && runner.is_file() {
+            return Ok((
+                entry_override.unwrap_or(entry),
+                runner_override.unwrap_or(runner),
+            ));
         }
         if !dir.pop() {
             break;
         }
     }
-    Err("Could not find sidecar/src/index.ts. Set LIPLUS_SIDECAR_ENTRY to its path.".to_string())
+    Err("Could not find sidecar/src/index.ts next to node_modules/tsx. \
+         Run npm install, or set LIPLUS_SIDECAR_ENTRY and LIPLUS_SIDECAR_RUNNER."
+        .to_string())
 }
 
 /// What the caller gets back after a session joins.
@@ -89,7 +115,7 @@ pub fn start_session(
         return Err(format!("Tab \"{}\" points at a missing directory: {}", tab.name, cwd.display()));
     }
 
-    let sidecar_entry = resolve_sidecar_entry()?;
+    let (sidecar_entry, sidecar_runner) = resolve_sidecar_paths()?;
     let mcp_config = register_sidecar(
         &cwd,
         &RoomRegistration {
@@ -97,6 +123,7 @@ pub fn start_session(
             token: &room.token(),
             agent_name: &tab.name,
             sidecar_entry: &sidecar_entry,
+            sidecar_runner: &sidecar_runner,
         },
     )?;
 
