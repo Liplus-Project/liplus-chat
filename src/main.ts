@@ -44,9 +44,22 @@ interface AppConfig {
 interface StartedSession {
   pty_id: string;
   mcp_config: string;
+  /** When the session was launched, stamped by the room's own clock. */
+  started_at: string;
 }
 
 const NAME_KEY = "liplus-chat.display-name";
+
+/**
+ * Hue of `--accent`, and the arc the other participants are drawn from.
+ *
+ * `#3a6ea5` measured in oklch. The accent is this screen's own colour, so the
+ * derived hues start a gap past it and stop a gap short of it: a participant
+ * whose name happened to land on the accent would look like oneself.
+ */
+const ACCENT_HUE = 251.5;
+const RESERVED_ARC = 25;
+const DERIVED_ARC = 360 - RESERVED_ARC * 2;
 
 const roomEl = document.getElementById("room") as HTMLElement;
 const rosterEl = document.getElementById("roster") as HTMLElement;
@@ -61,6 +74,11 @@ const diagnosticsEl = document.getElementById("diagnostics") as HTMLElement;
 const toggleEl = document.getElementById("toggle-diagnostics") as HTMLButtonElement;
 const socketStateEl = document.getElementById("socket-state") as HTMLElement;
 const sessionStateEl = document.getElementById("session-state") as HTMLElement;
+const transportEl = document.getElementById("session-transport") as HTMLElement;
+const commandEl = document.getElementById("session-command") as HTMLElement;
+const dirEl = document.getElementById("session-dir") as HTMLElement;
+const startedEl = document.getElementById("session-started") as HTMLElement;
+const windowEl = document.getElementById("session-window") as HTMLElement;
 const terminalEl = document.getElementById("terminal") as HTMLElement;
 const cwdEl = document.getElementById("session-cwd") as HTMLInputElement;
 const optionsEl = document.getElementById("launch-options") as HTMLInputElement;
@@ -105,6 +123,7 @@ function fitTerminal(): void {
     return;
   }
   if (activePtyId !== null) {
+    showWindowSize();
     void invoke("resize_pty", {
       id: activePtyId,
       cols: terminal.cols,
@@ -113,6 +132,16 @@ function fitTerminal(): void {
       // The session may have exited between the fit and the call.
     });
   }
+}
+
+/**
+ * The size the CLI is laid out for.
+ *
+ * A TUI that is drawing at the wrong size looks like a broken TUI, and the
+ * number it was given is the one thing that says which of the two it is.
+ */
+function showWindowSize(): void {
+  windowEl.textContent = `${terminal.cols}×${terminal.rows}`;
 }
 
 /** Render saved arguments back into an editable line. */
@@ -142,6 +171,37 @@ async function refreshPreview(): Promise<void> {
   }
 }
 
+/**
+ * The hue a participant's name lands on.
+ *
+ * From the name, so the same participant is the same colour every time they
+ * speak and in the roster beside their name. Not from arrival order: a
+ * participant who reconnects would come back a different colour, and the
+ * colour would then say when they joined rather than who they are.
+ */
+function hueFor(name: string): number {
+  // FNV-1a. Any stable spread would do; this one is four lines.
+  let hash = 2166136261;
+  for (let i = 0; i < name.length; i += 1) {
+    hash ^= name.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (ACCENT_HUE + RESERVED_ARC + (Math.abs(hash) % DERIVED_ARC)) % 360;
+}
+
+/**
+ * The colour a participant is drawn in.
+ *
+ * Lightness and chroma are the accent's, in whichever theme is showing; only
+ * the hue turns. Oneself is the accent itself rather than a hue derived from
+ * one's own name, which is what keeps one colour in the room recognisably
+ * one's own now that colour no longer runs on the self/other axis.
+ */
+function speakerColor(name: string, own: boolean): string {
+  if (own) return "var(--accent)";
+  return `oklch(var(--speaker-l) var(--speaker-c) ${hueFor(name).toFixed(1)})`;
+}
+
 function shortTime(iso: string): string {
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return "";
@@ -155,7 +215,9 @@ function appendMessage(message: RoomMessage): void {
 
   const line = document.createElement("article");
   line.className = "message";
-  line.dataset.own = message.own ? "true" : "false";
+  // `own` rather than a name test: the room decides self on the connection a
+  // post arrived on, which a rename cannot blur (#40).
+  line.style.setProperty("--speaker", speakerColor(message.speaker, message.own));
 
   const head = document.createElement("div");
   head.className = "meta";
@@ -188,9 +250,50 @@ function appendMessage(message: RoomMessage): void {
   if (atBottom) roomEl.scrollTop = roomEl.scrollHeight;
 }
 
+/**
+ * Draw the roster into the panel.
+ *
+ * The list is the room's roster and nothing else: the screen keeps no second
+ * list of who is present, so a name on this panel is a name a post can be
+ * addressed to. Each entry carries the colour that participant's lines carry
+ * in the room, which is what makes the panel a legend for the conversation
+ * rather than a second copy of the same names.
+ */
 function renderRoster(joined: string[]): void {
   participants = joined;
-  rosterEl.textContent = joined.length ? joined.join(" / ") : "参加者なし";
+  const mine = localName();
+  rosterEl.replaceChildren();
+
+  if (!joined.length) {
+    const empty = document.createElement("li");
+    empty.className = "empty";
+    empty.textContent = "参加者なし";
+    rosterEl.appendChild(empty);
+  }
+
+  for (const name of joined) {
+    const own = name === mine;
+    const entry = document.createElement("li");
+    entry.style.setProperty("--speaker", speakerColor(name, own));
+
+    const dot = document.createElement("span");
+    dot.className = "dot";
+
+    const who = document.createElement("span");
+    who.className = "who";
+    who.textContent = name;
+    who.title = name;
+
+    entry.append(dot, who);
+    if (own) {
+      const you = document.createElement("span");
+      you.className = "self";
+      you.textContent = "（あなた）";
+      entry.appendChild(you);
+    }
+    rosterEl.appendChild(entry);
+  }
+
   renderAddressees();
 }
 
@@ -279,6 +382,17 @@ async function followSession(tab: TabConfig, started: StartedSession): Promise<v
   sessionStateEl.dataset.kind = "ok";
   activePtyId = started.pty_id;
 
+  // How this session was launched, on the panel rather than in the person's
+  // memory: a session that is answering nothing is read against the directory
+  // and the command it actually got, not against the ones that were intended.
+  // They stay on screen after the session exits — the question is what ran.
+  transportEl.textContent = "PTY";
+  commandEl.textContent = tab.command;
+  dirEl.textContent = tab.cwd ?? "—";
+  dirEl.title = tab.cwd ?? "";
+  startedEl.textContent = shortTime(started.started_at);
+  showWindowSize();
+
   await listen<string>(`pty-data-${started.pty_id}`, (event) => terminal.write(event.payload));
   await listen<number | null>(`pty-exit-${started.pty_id}`, (event) => {
     const code = event.payload;
@@ -358,7 +472,9 @@ function renderSocket(port: number | null, error?: string): void {
     socketStateEl.dataset.kind = "error";
     return;
   }
-  socketStateEl.textContent = `127.0.0.1:${port} で待受中`;
+  // The address alone. It is an address, and the panel column is one line
+  // wide; that it is being listened on is what the accent colour says.
+  socketStateEl.textContent = `127.0.0.1:${port}`;
   socketStateEl.dataset.kind = "ok";
 }
 

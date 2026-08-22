@@ -11,7 +11,10 @@
     <div id="app">
       <header id="titlebar">
         <span class="title">Li+ Chat</span>
-        <span id="roster" class="roster">参加者なし</span>
+        <!-- The roster used to be echoed here as one line. It is the
+             participant panel's list now: two renderings of one roster is one
+             surface too many, and the panel is always on screen. -->
+        <span class="spacer"></span>
         <label class="who">
           名前
           <input id="display-name" type="text" value="human" spellcheck="false" />
@@ -41,44 +44,77 @@
         <span id="launch-preview" class="preview"></span>
       </div>
 
-      <main id="room" aria-live="polite"></main>
+      <div id="body">
+        <div id="conversation">
+          <main id="room" aria-live="polite"></main>
 
-      <!-- Diagnostics, not the conversation surface. The room shows what was
-           said; this shows the CLI that was launched, as it actually renders.
-           Nothing here is read as a message: the room's lines come from the
-           channel and from say_to_room, never from this output. -->
-      <aside id="diagnostics" hidden>
-        <dl class="facts">
-          <dt>部屋ソケット</dt>
-          <dd id="socket-state">確認中</dd>
-          <dt>セッション</dt>
-          <dd id="session-state">未起動</dd>
-        </dl>
+          <!-- Diagnostics, not the conversation surface. The room shows what
+               was said; this shows the CLI that was launched, as it actually
+               renders. Nothing here is read as a message: the room's lines come
+               from the channel and from say_to_room, never from this output.
 
-        <div id="terminal" aria-label="セッションの端末"></div>
-      </aside>
+               Only the terminal is left here. The values that are read rather
+               than watched — the socket, the session, how it was launched —
+               moved to the participant panel, where they are on screen without
+               opening anything. -->
+          <aside id="diagnostics" hidden>
+            <div id="terminal" aria-label="セッションの端末"></div>
+          </aside>
 
-      <footer id="composer">
-        <!-- The addressee is optional. Leaving it on 全体 is a room-wide
-             utterance; who answers one of those is the participants'
-             judgment, not the room's. The room delivers every utterance to
-             everyone either way, and anyone in the roster can be named —
-             people and sessions alike. -->
-        <label class="to">
-          宛先
-          <select id="to-select">
-            <option value="">全体</option>
-          </select>
-        </label>
-        <textarea
-          id="input"
-          rows="2"
-          placeholder="部屋に発言する（Enter で送信 / Shift+Enter で改行）"
-        ></textarea>
-        <button id="send" type="button">送信</button>
-      </footer>
+          <footer id="composer">
+            <!-- The addressee is optional. Leaving it on 全体 is a room-wide
+                 utterance; who answers one of those is the participants'
+                 judgment, not the room's. The room delivers every utterance to
+                 everyone either way, and anyone in the roster can be named —
+                 people and sessions alike. -->
+            <label class="to">
+              宛先
+              <select id="to-select">
+                <option value="">全体</option>
+              </select>
+            </label>
+            <textarea
+              id="input"
+              rows="2"
+              placeholder="部屋に発言する（Enter で送信 / Shift+Enter で改行）"
+            ></textarea>
+            <button id="send" type="button">送信</button>
+          </footer>
 
-      <div id="status" role="status"></div>
+          <div id="status" role="status"></div>
+        </div>
+
+        <!-- Who is in the room, and what the session under it was launched
+             from. The values were all reachable before this panel existed;
+             what was missing was a place that shows them without being
+             opened. -->
+        <aside id="participants" aria-label="参加者">
+          <h2 class="panel-title">参加者</h2>
+          <!-- Seeded, because the roster only arrives once the room answers:
+               a blank strip there would read as "nobody" before anyone has
+               been asked. -->
+          <ul id="roster" class="roster">
+            <li class="empty">参加者なし</li>
+          </ul>
+
+          <dl class="facts">
+            <dt>部屋ソケット</dt>
+            <dd id="socket-state">確認中</dd>
+            <dt>セッション</dt>
+            <dd id="session-state">未起動</dd>
+            <dt>接続方法</dt>
+            <dd id="session-transport">—</dd>
+            <dt>起動コマンド</dt>
+            <dd id="session-command">—</dd>
+            <dt>作業ディレクトリ</dt>
+            <dd id="session-dir" class="path">—</dd>
+            <dt>開始時刻</dt>
+            <dd id="session-started">—</dd>
+            <dt>ウィンドウ</dt>
+            <dd id="session-window">—</dd>
+          </dl>
+        </aside>
+      </div>
     </div>
   </body>
 </html>

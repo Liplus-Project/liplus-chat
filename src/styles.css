@@ -7,6 +7,12 @@
   --surface: #f4f4f7;
   --accent: #3a6ea5;
   --danger: #a52a2a;
+  /* One participant is told from another by hue alone: every participant
+     colour is the accent's own lightness and chroma with the hue turned. The
+     pair below is #3a6ea5 measured in oklch, not a value chosen next to it, so
+     a participant sits at the same weight on the page as the accent does. */
+  --speaker-l: 0.528;
+  --speaker-c: 0.104;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -18,6 +24,11 @@
     --surface: #202026;
     --accent: #7aa7d8;
     --danger: #e08585;
+    /* #7aa7d8 measured the same way. The dark accent is lighter and slightly
+       less saturated, so carrying the light pair over here would leave every
+       participant but oneself too dark to read against #17171a. */
+    --speaker-l: 0.715;
+    --speaker-c: 0.087;
   }
 }
 
@@ -58,14 +69,9 @@ body {
   font-weight: 600;
 }
 
-#titlebar .roster {
-  color: var(--muted);
-  /* The roster is the one thing here that grows; it takes the slack so the
-     controls stay pinned to the right. */
+/* Takes the slack so the controls stay pinned to the right. */
+#titlebar .spacer {
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 #titlebar .who {
@@ -99,6 +105,25 @@ body {
   opacity: 0.6;
 }
 
+/* ── body ────────────────────────────────────────────────────────────────── */
+
+/* The conversation and the panel stand side by side, so the panel is read
+   without leaving the room. */
+#body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+#conversation {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  /* Without this a long unbroken line in the room widens the column and pushes
+     the panel off the window. */
+  min-width: 0;
+}
+
 /* ── room ────────────────────────────────────────────────────────────────── */
 
 #room {
@@ -110,18 +135,19 @@ body {
   gap: 0.75rem;
 }
 
+/* Speaker attribution is the load-bearing distinction in this room, so one
+   participant is separated from another by colour as well as by name. The axis
+   is the participant: `--speaker` is set per line from the name on it, so the
+   colour beside a line and the dot beside that name in the panel are the same
+   colour, and a line can be traced to a participant without reading it.
+   Self/other was the earlier axis (#39) and is a two-valued one — it gave every
+   participant but oneself one shared colour. Oneself keeps the accent, and the
+   derived hues leave a gap around it, so that one colour still reads as one's
+   own. */
 .message {
   max-width: 46rem;
-  border-left: 3px solid var(--line);
+  border-left: 3px solid var(--speaker, var(--line));
   padding-left: 0.7rem;
-}
-
-/* Speaker attribution is the load-bearing distinction in this room, so one
-   participant is separated from another by colour as well as by name. The
-   axis is self vs other: the room carries no human/AI distinction, and a
-   colour drawn on one would be reading a line that is no longer there (#39). */
-.message[data-own="true"] {
-  border-left-color: var(--accent);
 }
 
 .message .meta {
@@ -137,8 +163,10 @@ body {
   color: var(--fg);
 }
 
+/* The addressee is written in the speaker's colour, not the addressee's: it is
+   part of what this speaker said. */
 .message .to {
-  color: var(--accent);
+  color: var(--speaker, var(--accent));
 }
 
 .message .body {
@@ -226,33 +254,122 @@ body {
   padding: 0.6rem 0.9rem;
   font-size: 0.78rem;
   /* The CLI is a full-screen TUI; a strip too short to hold its frame is not
-     worth opening. */
+     worth opening. This is also why the terminal stayed in this column instead
+     of folding into the participant panel: at the panel's width the CLI has no
+     frame to draw. */
   height: 50vh;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
 
-#diagnostics .facts {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.2rem 0.75rem;
-  margin: 0;
+/* The `display` above outranks the user agent's rule for the attribute, so
+   without this the pane is never actually folded and the terminal sits under
+   the room from the first frame. */
+#diagnostics[hidden] {
+  display: none;
 }
 
-#diagnostics dt {
+/* ── participants ────────────────────────────────────────────────────────── */
+
+#participants {
+  width: 16.5rem;
+  flex: none;
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  font-size: 0.78rem;
+}
+
+#participants .panel-title {
+  margin: 0;
+  padding: 0.6rem 0.9rem 0.35rem;
+  font-size: inherit;
+  font-weight: 600;
+}
+
+#participants .roster {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#participants .roster li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.9rem;
+}
+
+/* The same colour the participant's lines carry in the room. */
+#participants .dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  flex: none;
+  border-radius: 999px;
+  background: var(--speaker, var(--line));
+}
+
+#participants .who {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The name this screen posts under. Colour alone would say it, but only to
+   someone who already knows which colour is theirs. */
+#participants .self {
   color: var(--muted);
 }
 
-#diagnostics dd {
-  margin: 0;
+#participants .empty {
+  padding: 0.45rem 0.9rem;
+  color: var(--muted);
 }
 
-#diagnostics dd[data-kind="ok"] {
+#participants .facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.3rem 0.6rem;
+  margin: 0.35rem 0 0;
+  border-top: 1px solid var(--line);
+  padding: 0.6rem 0.9rem;
+  font-size: 0.75rem;
+}
+
+#participants dt {
+  color: var(--muted);
+}
+
+/* Values are read against each other down the right edge, and every one of
+   them is a literal — a port, a path, a command — so they are set in the same
+   face the terminal uses. */
+#participants dd {
+  margin: 0;
+  font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A path is the one value here that is longer than the column. It gets the
+   whole width, below its own label, because a working directory truncated in
+   the middle is the value least worth guessing at. */
+#participants dd.path {
+  grid-column: 1 / -1;
+  text-align: left;
+}
+
+#participants dd[data-kind="ok"] {
   color: var(--accent);
 }
 
-#diagnostics dd[data-kind="error"] {
+#participants dd[data-kind="error"] {
   color: var(--danger);
 }
 

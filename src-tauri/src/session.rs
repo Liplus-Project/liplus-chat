@@ -94,6 +94,14 @@ pub struct StartedSession {
     pub pty_id: String,
     /// Absolute path of the `.mcp.json` this touched, so the UI can say where.
     pub mcp_config: String,
+    /// When the PTY was spawned, RFC 3339.
+    ///
+    /// Stamped here rather than on the screen because this is the moment the
+    /// session began: the screen learns of it after the launch has returned,
+    /// and a launch that takes a while would be recorded as having started
+    /// late. Same clock as a post's `ts`, so the panel's start time and the
+    /// first line of the conversation can be read against each other.
+    pub started_at: String,
 }
 
 #[tauri::command]
@@ -146,6 +154,7 @@ pub fn start_session(
         },
     )?;
 
+    let started_at = crate::room::now_iso();
     let pty_id = pty::spawn_pty(
         app,
         pty_state,
@@ -159,5 +168,6 @@ pub fn start_session(
     Ok(StartedSession {
         pty_id,
         mcp_config: mcp_config.to_string_lossy().to_string(),
+        started_at,
     })
 }
