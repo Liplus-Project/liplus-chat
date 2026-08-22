@@ -15,15 +15,35 @@
              participant panel's list now: two renderings of one roster is one
              surface too many, and the panel is always on screen. -->
         <span class="spacer"></span>
+        <!-- Who this screen's person is in the room: the name they answer to
+             and the colour they are drawn in. One pair, declared together,
+             because they are one declaration — this is who I am here. The
+             launcher below carries the same pair for a session. -->
         <label class="who">
           名前
           <input id="display-name" type="text" value="human" spellcheck="false" />
+        </label>
+        <label class="who">
+          色
+          <select id="display-hue"></select>
         </label>
         <button id="toggle-diagnostics" type="button" aria-expanded="false">診断</button>
       </header>
 
       <div id="launcher">
         <select id="tab-select" aria-label="起動するセッション"></select>
+        <!-- The name and colour this session joins under. Not the tab's: the
+             tab says which CLI to run, and every launch off one tab used to
+             answer to that one name, which left two sessions indistinguishable
+             and unaddressable (#40). -->
+        <label class="who">
+          名前
+          <input id="session-name" type="text" spellcheck="false" />
+        </label>
+        <label class="who">
+          色
+          <select id="session-hue"></select>
+        </label>
         <label class="cwd">
           作業ディレクトリ
           <input id="session-cwd" type="text" spellcheck="false" />
