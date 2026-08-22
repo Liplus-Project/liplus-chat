@@ -1,9 +1,9 @@
 // The room surface.
 //
-// Messages arrive on one event (`room-message`) whether a human or an agent
-// spoke, so the room has a single ordering authority. A human utterance is not
-// appended locally on send — it comes back through the same event the agents'
-// replies do. See src-tauri/src/room.rs.
+// Everyone in the room is a participant, and a post is one act whoever made it
+// (#39). Messages arrive on one event (`room-message`) either way, so the room
+// has a single ordering authority; what is typed here is not appended locally
+// on send but comes back through that same event. See src-tauri/src/room.rs.
 //
 // The diagnostics pane carries a real terminal for the launched CLI. That is a
 // display, not a message source: the room's lines come from the channel and
@@ -19,12 +19,13 @@ import "@xterm/xterm/css/xterm.css";
 
 interface RoomMessage {
   message_id: string;
-  /** "human" or "agent". */
-  kind: string;
   speaker: string;
   content: string;
   to: string | null;
   ts: string;
+  /** True when this screen's own participant posted it. Self/other, not
+   *  human/AI: the room no longer carries that axis. */
+  own: boolean;
 }
 
 interface TabConfig {
@@ -66,8 +67,8 @@ const optionsEl = document.getElementById("launch-options") as HTMLInputElement;
 const previewEl = document.getElementById("launch-preview") as HTMLElement;
 
 let tabs: TabConfig[] = [];
-/** Who is in the room, as the addressee list is drawn from. */
-let agents: string[] = [];
+/** Everyone in the room, this screen's person included. */
+let participants: string[] = [];
 /** The session the terminal is attached to, once one is running. */
 let activePtyId: string | null = null;
 
@@ -154,7 +155,7 @@ function appendMessage(message: RoomMessage): void {
 
   const line = document.createElement("article");
   line.className = "message";
-  line.dataset.kind = message.kind;
+  line.dataset.own = message.own ? "true" : "false";
 
   const head = document.createElement("div");
   head.className = "meta";
@@ -188,22 +189,48 @@ function appendMessage(message: RoomMessage): void {
 }
 
 function renderRoster(joined: string[]): void {
-  agents = joined;
+  participants = joined;
   rosterEl.textContent = joined.length ? joined.join(" / ") : "参加者なし";
   renderAddressees();
+}
+
+/** The name this screen posts under, and is listed in the roster under. */
+function localName(): string {
+  return nameEl.value.trim() || "human";
+}
+
+/**
+ * Take a seat in the room under the current name.
+ *
+ * Being in the room is not the same as having spoken in it: without this the
+ * roster would list only the sessions, and nobody could address someone who
+ * had not spoken yet.
+ */
+async function join(): Promise<void> {
+  try {
+    await invoke("room_join", { name: localName() });
+  } catch {
+    // Failing to seat is not worth interrupting anything: the first post
+    // seats the name anyway.
+  }
 }
 
 /**
  * Redraw the addressee list from the roster.
  *
- * The names have to be the ones the agents answer to, so they come from the
+ * The names have to be the ones participants answer to, so they come from the
  * roster rather than being typed: a mistyped addressee is an utterance
  * addressed to nobody, and nothing on screen would say so. A chosen addressee
  * survives a roster change while that participant is still present, and falls
  * back to the whole room when they leave.
+ *
+ * Everyone but oneself is addressable — sessions and people alike, since the
+ * roster no longer separates them.
  */
 function renderAddressees(): void {
   const chosen = toEl.value;
+  const mine = localName();
+  const addressable = participants.filter((name) => name !== mine);
   toEl.replaceChildren();
 
   const everyone = document.createElement("option");
@@ -211,27 +238,27 @@ function renderAddressees(): void {
   everyone.textContent = "全体";
   toEl.appendChild(everyone);
 
-  for (const agent of agents) {
+  for (const participant of addressable) {
     const option = document.createElement("option");
-    option.value = agent;
-    option.textContent = agent;
+    option.value = participant;
+    option.textContent = participant;
     toEl.appendChild(option);
   }
 
-  toEl.value = agents.includes(chosen) ? chosen : "";
+  toEl.value = addressable.includes(chosen) ? chosen : "";
 }
 
 async function send(): Promise<void> {
   const content = inputEl.value.trim();
   if (!content) return;
 
-  const user = nameEl.value.trim() || "human";
+  const speaker = localName();
   // Empty means the room as a whole. The app still delivers to everyone; the
-  // addressee is judgment material for the agents, not a delivery filter.
+  // addressee is judgment material for the participants, not a delivery filter.
   const to = toEl.value || null;
   inputEl.value = "";
   try {
-    await invoke<string>("room_say", { user, content, to });
+    await invoke<string>("room_post", { speaker, content, to });
     status("");
   } catch (err) {
     // Put the text back rather than losing what was typed.
@@ -377,7 +404,10 @@ async function main(): Promise<void> {
 
   nameEl.value = localStorage.getItem(NAME_KEY) ?? "human";
   nameEl.addEventListener("change", () => {
-    localStorage.setItem(NAME_KEY, nameEl.value.trim() || "human");
+    localStorage.setItem(NAME_KEY, localName());
+    // The roster entry follows the name, and the addressee list follows the
+    // roster: a rename must not leave the old name sitting in either.
+    void join().then(() => renderAddressees());
   });
 
   toggleEl.addEventListener("click", () => {
@@ -390,7 +420,7 @@ async function main(): Promise<void> {
   });
 
   await listen<RoomMessage>("room-message", (event) => appendMessage(event.payload));
-  await listen<string[]>("room-agents", (event) => renderRoster(event.payload));
+  await listen<string[]>("room-participants", (event) => renderRoster(event.payload));
   // The socket binds after the frontend loads, so the event is the authority
   // and the poll below is only for a listener that attached too late.
   await listen<number>("room-ready", (event) => renderSocket(event.payload));
@@ -435,7 +465,8 @@ async function main(): Promise<void> {
   }
 
   try {
-    renderRoster(await invoke<string[]>("room_agents"));
+    await join();
+    renderRoster(await invoke<string[]>("room_participants"));
     const port = await invoke<number | null>("room_port");
     if (port !== null) renderSocket(port);
   } catch (err) {

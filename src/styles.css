@@ -116,9 +116,11 @@ body {
   padding-left: 0.7rem;
 }
 
-/* Speaker attribution is the load-bearing distinction in this room, so the
-   two kinds are separated by colour as well as by name. */
-.message[data-kind="human"] {
+/* Speaker attribution is the load-bearing distinction in this room, so one
+   participant is separated from another by colour as well as by name. The
+   axis is self vs other: the room carries no human/AI distinction, and a
+   colour drawn on one would be reading a line that is no longer there (#39). */
+.message[data-own="true"] {
   border-left-color: var(--accent);
 }
 
