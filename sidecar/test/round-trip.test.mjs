@@ -177,6 +177,26 @@ test("a room post reaches the channel, and say_to_room reaches the room", async 
     /人間と AI を区別しません/,
     "instructions must state that participants are not split into human and AI",
   );
+  // Turn-taking. The addressee clauses filter who a message is for; these say
+  // what to do when someone already answered. Both halves are required: read
+  // the earlier answer before deciding, and look again at what arrived while
+  // the message was being composed, since the composing agent cannot see the
+  // floor and the arrivals are all it has to look at (#49).
+  assert.match(
+    init.result.instructions ?? "",
+    /先に誰かが答えていたら、その発言を読んでから自分の発言を決めて/,
+    "instructions must tell the agent to read an earlier answer before deciding its own",
+  );
+  assert.match(
+    init.result.instructions ?? "",
+    /送る直前に、届いている発言をもう一度見て/,
+    "instructions must tell the agent to re-read what arrived just before sending",
+  );
+  assert.match(
+    init.result.instructions ?? "",
+    /全員が答える必要はありません/,
+    "instructions must state that a room-wide question needs no answer from everyone",
+  );
 
   notify("notifications/initialized", {});
 
