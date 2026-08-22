@@ -39,7 +39,7 @@ function withTimeout(promise, label) {
   ]);
 }
 
-test("room say reaches the channel, and say_to_room reaches the room", async (t) => {
+test("a room post reaches the channel, and say_to_room reaches the room", async (t) => {
   // ── fake room ──────────────────────────────────────────────────────────────
   const http = createServer();
   const wss = new WebSocketServer({ server: http });
@@ -48,7 +48,7 @@ test("room say reaches the channel, and say_to_room reaches the room", async (t)
 
   const connected = deferred();
   const helloSeen = deferred();
-  const replySeen = deferred();
+  const postSeen = deferred();
   let roomSocket = null;
 
   wss.on("connection", (socket) => {
@@ -57,7 +57,7 @@ test("room say reaches the channel, and say_to_room reaches the room", async (t)
     socket.on("message", (raw) => {
       const frame = JSON.parse(raw.toString());
       if (frame.type === "hello") helloSeen.resolve(frame);
-      if (frame.type === "reply") replySeen.resolve(frame);
+      if (frame.type === "post") postSeen.resolve(frame);
     });
   });
 
@@ -152,7 +152,7 @@ test("room say reaches the channel, and say_to_room reaches the room", async (t)
   assert.match(
     init.result.instructions ?? "",
     /say_to_room/,
-    "instructions must name the reply tool",
+    "instructions must name the posting tool",
   );
   // The manners and the material they are judged on ship together. Manners
   // that say "answer what is addressed to you" without naming where the
@@ -168,6 +168,14 @@ test("room say reaches the channel, and say_to_room reaches the room", async (t)
     /test-agent/,
     "instructions must tell the agent the name it answers to",
   );
+  // The model lives in the manners as much as in the frames. An agent told to
+  // answer "the human" would be reading a distinction the protocol no longer
+  // carries (#39).
+  assert.match(
+    init.result.instructions ?? "",
+    /人間と AI を区別しません/,
+    "instructions must state that participants are not split into human and AI",
+  );
 
   notify("notifications/initialized", {});
 
@@ -175,20 +183,20 @@ test("room say reaches the channel, and say_to_room reaches the room", async (t)
   assert.deepEqual(
     tools.result.tools.map((tool) => tool.name),
     ["say_to_room"],
-    "exactly one reply tool is exposed",
+    "exactly one posting tool is exposed",
   );
 
   // ── room -> agent ──────────────────────────────────────────────────────────
   await withTimeout(connected.promise, "sidecar to connect to the room");
   const hello = await withTimeout(helloSeen.promise, "hello frame");
-  assert.equal(hello.agent, "test-agent");
-  assert.equal(hello.protocol, 1);
+  assert.equal(hello.name, "test-agent");
+  assert.equal(hello.protocol, 2);
 
   roomSocket.send(
     JSON.stringify({
-      type: "say",
+      type: "post",
       message_id: "m-1",
-      user: "Master",
+      speaker: "Master",
       content: "聞こえる？",
       ts: "2026-08-21T00:00:00.000Z",
     }),
@@ -212,9 +220,9 @@ test("room say reaches the channel, and say_to_room reaches the room", async (t)
   // ── the addressee rides through to the agent ───────────────────────────────
   roomSocket.send(
     JSON.stringify({
-      type: "say",
+      type: "post",
       message_id: "m-2",
-      user: "Master",
+      speaker: "Master",
       content: "リンだけ答えて",
       to: "test-agent",
       ts: "2026-08-21T00:00:01.000Z",
@@ -231,9 +239,9 @@ test("room say reaches the channel, and say_to_room reaches the room", async (t)
   // agent decides. Filtering here would put "who heard it" in the room.
   roomSocket.send(
     JSON.stringify({
-      type: "say",
+      type: "post",
       message_id: "m-3",
-      user: "Master",
+      speaker: "Master",
       content: "レイはどう思う",
       to: "other-agent",
       ts: "2026-08-21T00:00:02.000Z",
@@ -243,17 +251,44 @@ test("room say reaches the channel, and say_to_room reaches the room", async (t)
   const elsewhere = await nextNotification("notifications/claude/channel", 2);
   assert.equal(elsewhere.params.meta.to, "other-agent");
 
-  // ── agent -> room ──────────────────────────────────────────────────────────
+  // ── this participant -> room ───────────────────────────────────────────────
   const call = await request("tools/call", {
     name: "say_to_room",
     arguments: { content: "聞こえてるわ", to: "Master" },
   });
   assert.ok(!call.result.isError, `tool call failed: ${JSON.stringify(call.result)}`);
 
-  const reply = await withTimeout(replySeen.promise, "reply frame");
-  assert.equal(reply.agent, "test-agent");
-  assert.equal(reply.content, "聞こえてるわ");
-  assert.equal(reply.to, "Master");
+  const post = await withTimeout(postSeen.promise, "post frame");
+  assert.equal(post.type, "post");
+  assert.equal(post.content, "聞こえてるわ");
+  // A person is addressed exactly like a session. One vocabulary, one frame.
+  assert.equal(post.to, "Master");
+  // Attribution belongs to the room, stamped from the connection. A sender
+  // that could name itself could name somebody else.
+  assert.equal(
+    "speaker" in post,
+    false,
+    "a posting participant must not name itself; the room stamps the speaker",
+  );
+
+  // ── suppression is the room's, and is not decided by name ─────────────────
+  // The room drops a post on the connection that produced it, so this side
+  // never has to recognise itself. It must not second-guess that with a name
+  // test: while two participants share a name, a name test here would swallow
+  // the other one's posts too (#40).
+  roomSocket.send(
+    JSON.stringify({
+      type: "post",
+      message_id: "m-4",
+      speaker: "test-agent",
+      content: "同じ名前の別参加者",
+      ts: "2026-08-21T00:00:03.000Z",
+    }),
+  );
+
+  const sameName = await nextNotification("notifications/claude/channel", 3);
+  assert.equal(sameName.params.meta.message_id, "m-4");
+  assert.equal(sameName.params.meta.user, "test-agent");
 
   // ── a dropped frame must not read as delivered ─────────────────────────────
   roomSocket.close();
