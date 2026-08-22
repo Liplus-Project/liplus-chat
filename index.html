@@ -90,7 +90,12 @@
              opened. -->
         <aside id="participants" aria-label="参加者">
           <h2 class="panel-title">参加者</h2>
-          <ul id="roster" class="roster"></ul>
+          <!-- Seeded, because the roster only arrives once the room answers:
+               a blank strip there would read as "nobody" before anyone has
+               been asked. -->
+          <ul id="roster" class="roster">
+            <li class="empty">参加者なし</li>
+          </ul>
 
           <dl class="facts">
             <dt>部屋ソケット</dt>
