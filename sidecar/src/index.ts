@@ -15,8 +15,11 @@
  *                     port or the launch moment from its own side.
  *
  * Direction of travel:
- *   room says     -> WebSocket frame -> channel notification -> agent reacts
- *   agent replies -> `say_to_room` tool -> WebSocket frame -> the room
+ *   someone posts -> WebSocket frame -> channel notification -> agent reacts
+ *   this agent posts -> `say_to_room` tool -> WebSocket frame -> the room
+ *
+ * Both directions carry the same frame. A person and a session are both
+ * participants of the room, and what separates them is a name (#39).
  *
  * The CLI terminal output is never read as a message source. stdout belongs to
  * the MCP transport; every log line goes to stderr.
@@ -31,11 +34,11 @@ import WebSocket from "ws";
 import { randomUUID } from "node:crypto";
 
 const ROOM_URL = process.env.LIPLUS_ROOM_URL ?? "";
-const AGENT_NAME = process.env.LIPLUS_AGENT_NAME ?? "agent";
+const AGENT_NAME = process.env.LIPLUS_AGENT_NAME ?? "session";
 const ROOM_TOKEN = process.env.LIPLUS_ROOM_TOKEN ?? "";
 const CHAT_ID = process.env.LIPLUS_ROOM_ID ?? "liplus-chat";
 
-const PROTOCOL_VERSION = 1;
+const PROTOCOL_VERSION = 2;
 
 function log(line: string): void {
   process.stderr.write(`[liplus-chat sidecar] ${line}\n`);
@@ -43,24 +46,33 @@ function log(line: string): void {
 
 // ── Room frames ──────────────────────────────────────────────────────────────
 //
-// Room -> sidecar:
-//   { type: "say",   message_id, user, content, to?, ts }
 // Sidecar -> room:
-//   { type: "hello", protocol, agent }
-//   { type: "reply", message_id, agent, content, to?, ts }
+//   { type: "hello", protocol, name }
+//   { type: "post",  message_id, content, to?, ts }
+// Room -> sidecar:
+//   { type: "post",  message_id, speaker, content, to?, ts }
+//
+// One frame kind carries speech, whoever produced it. The room stamps
+// `speaker` from the connection the frame arrived on, so this side does not
+// send it: a participant names an addressee, never itself.
 //
 // `to` is optional in both directions and means the same thing on each: the
-// display name of the participant addressed. The room fans every frame out to
+// display name of the participant addressed. The room fans every post out to
 // everyone regardless — whether an utterance is yours to answer is decided
 // here, by the agent, not by the room narrowing its delivery.
+//
+// A participant never receives its own post. The room drops it on the way out,
+// judged on the connection it arrived on, so nothing here has to recognise
+// itself — and a name collision cannot make this side swallow someone else's
+// post (#40).
 //
 // Frames whose `type` is unknown are ignored rather than rejected, so the room
 // can add frame kinds without breaking a sidecar built against this revision.
 
-interface SayFrame {
-  type: "say";
+interface PostFrame {
+  type: "post";
   message_id?: string;
-  user?: string;
+  speaker?: string;
   content?: string;
   to?: string;
   ts?: string;
@@ -72,8 +84,12 @@ const INSTRUCTIONS = [
   "あなたは liplus-chat の部屋に参加しています。",
   `この部屋でのあなたの名前は「${AGENT_NAME}」です。`,
   "",
+  "この部屋は、人間と AI を区別しません。参加者は全員が同じ参加者であり、",
+  "違いは名前だけです。発言もひとつの行為で、誰が出しても同じ形で届きます。",
+  "相手が人間か別のセッションかを気にする必要はありません。",
+  "",
   '部屋の発言は <channel source="liplus-chat" ...> として届きます。',
-  "返信するときは say_to_room ツールを呼んでください。ターミナルへの出力は",
+  "発言するときは say_to_room ツールを呼んでください。ターミナルへの出力は",
   "部屋には届きません。",
   "",
   "宛先:",
@@ -82,9 +98,11 @@ const INSTRUCTIONS = [
   "- meta.to が他の参加者の名前なら、あなた宛ではありません。黙ってください。",
   "  補足したくなっても割り込まないでください。",
   "- meta.to が無い発言は部屋全体宛です。自分が答えるべきときだけ答えてください。",
-  "- say_to_room の to 引数で、こちらからも宛先を指定できます。",
+  "- say_to_room の to 引数で、こちらからも宛先を指定できます。宛先には",
+  "  人間の参加者も指定できます。指定の仕方は相手によって変わりません。",
   "",
   "部屋の作法:",
+  "- 自分の発言は返ってきません。届いた発言はすべて他の参加者のものです。",
   "- 返信しない判断は正当です。全員が答えると部屋は読めなくなります。",
   "- 一度の発言は簡潔に。長い説明が必要なときは、まず要点だけ返してください。",
   "- 他の参加者の発言を、自分の文脈として取り込まないでください。それぞれが",
@@ -148,10 +166,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   const to = typeof args?.to === "string" ? args.to : undefined;
+  // No speaker field: the room stamps that from this connection. Sending one
+  // would be a claim about who is speaking, and the room would overwrite it.
   const sent = sendToRoom({
-    type: "reply",
+    type: "post",
     message_id: randomUUID(),
-    agent: AGENT_NAME,
     content,
     ...(to ? { to } : {}),
     ts: new Date().toISOString(),
@@ -202,11 +221,14 @@ function sendToRoom(frame: Record<string, unknown>): boolean {
   }
 }
 
-function pushToChannel(frame: SayFrame): void {
+function pushToChannel(frame: PostFrame): void {
   const content = frame.content ?? "";
   if (!content) return;
 
-  const user = frame.user ?? "someone";
+  // `speaker` on the room's wire, `user` in the channel meta: the latter is
+  // the host's key and the host renders it, so the name is translated at this
+  // boundary rather than the room's frame being bent to the host's vocabulary.
+  const speaker = frame.speaker ?? "someone";
   // The addressee rides in meta for the same reason the speaker does: the body
   // must stay equal to what was said. It is judgment material, not text — the
   // instructions tell the agent to read it and decide whether to answer.
@@ -221,7 +243,7 @@ function pushToChannel(frame: SayFrame): void {
       meta: {
         chat_id: CHAT_ID,
         message_id: frame.message_id ?? randomUUID(),
-        user,
+        user: speaker,
         ...(to ? { to } : {}),
         ts: frame.ts ?? new Date().toISOString(),
       },
@@ -247,7 +269,7 @@ function connectRoom(): void {
     retryCount = 0;
     lastError = "";
     log(`room socket: connected as "${AGENT_NAME}"`);
-    sendToRoom({ type: "hello", protocol: PROTOCOL_VERSION, agent: AGENT_NAME });
+    sendToRoom({ type: "hello", protocol: PROTOCOL_VERSION, name: AGENT_NAME });
     pingTimer = setInterval(() => {
       if (socket.readyState === WebSocket.OPEN) socket.ping();
     }, PING_INTERVAL);
@@ -262,7 +284,7 @@ function connectRoom(): void {
     }
     if (typeof data !== "object" || data === null) return;
     const frame = data as { type?: string };
-    if (frame.type === "say") pushToChannel(frame as SayFrame);
+    if (frame.type === "post") pushToChannel(frame as PostFrame);
     // Unknown frame kinds are ignored on purpose; see the frame comment above.
   });
 
