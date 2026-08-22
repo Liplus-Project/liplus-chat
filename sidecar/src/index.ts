@@ -38,7 +38,23 @@ const AGENT_NAME = process.env.LIPLUS_AGENT_NAME ?? "session";
 const ROOM_TOKEN = process.env.LIPLUS_ROOM_TOKEN ?? "";
 const CHAT_ID = process.env.LIPLUS_ROOM_ID ?? "liplus-chat";
 
-const PROTOCOL_VERSION = 2;
+/**
+ * The hue this session was launched under, in oklch degrees, or null when it
+ * was launched without one.
+ *
+ * Null rather than a default. An undeclared participant is one the room derives
+ * a colour for from their name, and a number invented here would be indelible:
+ * the room cannot tell a declaration from a fallback once it is on the wire.
+ */
+const AGENT_HUE = readHue(process.env.LIPLUS_AGENT_HUE);
+
+function readHue(raw: string | undefined): number | null {
+  if (raw === undefined || raw.trim() === "") return null;
+  const hue = Number(raw);
+  return Number.isFinite(hue) ? hue : null;
+}
+
+const PROTOCOL_VERSION = 3;
 
 function log(line: string): void {
   process.stderr.write(`[liplus-chat sidecar] ${line}\n`);
@@ -47,7 +63,7 @@ function log(line: string): void {
 // ── Room frames ──────────────────────────────────────────────────────────────
 //
 // Sidecar -> room:
-//   { type: "hello", protocol, name }
+//   { type: "hello", protocol, name, hue? }
 //   { type: "post",  message_id, content, to?, ts }
 // Room -> sidecar:
 //   { type: "post",  message_id, speaker, content, to?, ts }
@@ -60,6 +76,12 @@ function log(line: string): void {
 // display name of the participant addressed. The room fans every post out to
 // everyone regardless — whether an utterance is yours to answer is decided
 // here, by the agent, not by the room narrowing its delivery.
+//
+// `hello` is where this session says who it is: the name it answers to and,
+// when it was launched with one, the hue it is drawn in. Both arrive from the
+// launch (`LIPLUS_AGENT_NAME` / `LIPLUS_AGENT_HUE`) rather than from anything
+// this file decides, because both are the person's declaration, made at the
+// moment of joining.
 //
 // A participant never receives its own post. The room drops it on the way out,
 // judged on the connection it arrived on, so nothing here has to recognise
@@ -269,7 +291,14 @@ function connectRoom(): void {
     retryCount = 0;
     lastError = "";
     log(`room socket: connected as "${AGENT_NAME}"`);
-    sendToRoom({ type: "hello", protocol: PROTOCOL_VERSION, name: AGENT_NAME });
+    // The hue key is omitted when none was declared, for the same reason `to`
+    // is: the room must be able to tell "declared nothing" from a value.
+    sendToRoom({
+      type: "hello",
+      protocol: PROTOCOL_VERSION,
+      name: AGENT_NAME,
+      ...(AGENT_HUE === null ? {} : { hue: AGENT_HUE }),
+    });
     pingTimer = setInterval(() => {
       if (socket.readyState === WebSocket.OPEN) socket.ping();
     }, PING_INTERVAL);
