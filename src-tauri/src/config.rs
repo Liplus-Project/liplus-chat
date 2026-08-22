@@ -6,6 +6,11 @@ use tauri::Manager;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TabConfig {
     pub id: String,
+    /// The tab's label — which CLI this launches. Not the name a session speaks
+    /// under in the room: that is declared per launch and passed to
+    /// `start_session` beside the tab. A tab is a launch recipe and lives in
+    /// this file; who joins the room is a choice made at the moment of joining,
+    /// and a stored one made every session answer to the same name (#40).
     pub name: String,
     pub command: String,
     pub args: Vec<String>,
@@ -50,6 +55,10 @@ impl Default for AppConfig {
         // spec drops the second vendor to keep that premise out of the
         // design. Shipping a tab that cannot join the room by default would
         // present a session that never speaks. See docs/0-requirements.md.
+        //
+        // `Claude Code` names the CLI, and that is all it names now. It used to
+        // be the name the session took in the room as well, which is why every
+        // session took that one.
         AppConfig {
             tabs: vec![TabConfig {
                 id: "tab-1".to_string(),

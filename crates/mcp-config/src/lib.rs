@@ -17,9 +17,63 @@
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 
-/// The name the sidecar is registered under in `.mcp.json`. The launch flag
-/// carries the same name (`server:<name>`), so the two must not drift apart.
-pub const SERVER_NAME: &str = "liplus-chat-room";
+/// Prefix of the name the sidecar is registered under in `.mcp.json`.
+///
+/// The full name is per participant (`server_name_for`), not one fixed key. Two
+/// sessions pointed at the same working directory write into the same file, and
+/// a single key means the second launch overwrites the first one's name, hue
+/// and room address — the identity the first session was launched with is gone
+/// while that session is still running (#40).
+pub const SERVER_PREFIX: &str = "liplus-chat-room";
+
+/// The `.mcp.json` key, and the `server:<name>` tag, for one participant.
+///
+/// A function of the declared name alone, so relaunching under the same name
+/// reuses its entry rather than accumulating a new one per launch. The readable
+/// half is a slug of the name; the hash is what makes the key total — a name
+/// with no ASCII in it (`マスター`) slugs to nothing, and two names can slug
+/// alike (`Lin` and `lin!`), and a key that collides is the collision this whole
+/// function exists to remove.
+pub fn server_name_for(agent_name: &str) -> String {
+    let slug = slugify(agent_name);
+    let hash = fnv1a(agent_name);
+    if slug.is_empty() {
+        format!("{SERVER_PREFIX}-{hash:08x}")
+    } else {
+        format!("{SERVER_PREFIX}-{slug}-{hash:08x}")
+    }
+}
+
+/// Lowercase ASCII alphanumerics, everything else a single separator.
+///
+/// This rides in a command-line flag (`server:<name>`) as well as in JSON, so
+/// it stays inside the character set every shell and console on the way leaves
+/// alone. Legibility only — `server_name_for` carries the uniqueness.
+fn slugify(name: &str) -> String {
+    let mut out = String::new();
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else if !out.ends_with('-') && !out.is_empty() {
+            out.push('-');
+        }
+        if out.len() >= 24 {
+            break;
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+/// FNV-1a, 32-bit. The same stable-spread hash the frontend derives a hue with;
+/// one hash idea in the codebase rather than two.
+fn fnv1a(text: &str) -> u32 {
+    let mut hash: u32 = 2_166_136_261;
+    for byte in text.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(16_777_619);
+    }
+    hash
+}
 
 /// Flags that silently stop channel pushes from arriving.
 pub const INCOMPATIBLE_FLAGS: &[&str] =
@@ -34,6 +88,11 @@ pub struct RoomRegistration<'a> {
     pub token: &'a str,
     /// Display name this session speaks under.
     pub agent_name: &'a str,
+    /// Hue this session declared, in oklch degrees, or `None` when it declared
+    /// none. Absent rather than a default: the room derives a hue from the name
+    /// for an undeclared participant, and a value written here would be a
+    /// declaration the person never made.
+    pub agent_hue: Option<f64>,
     /// Absolute path of the sidecar entry point.
     pub sidecar_entry: &'a Path,
     /// Absolute path of the TypeScript runner that executes the entry point.
@@ -66,8 +125,12 @@ pub const CHANNEL_FLAG: &str = "--dangerously-load-development-channels";
 /// and takes the whole room down, and two copies of this flag is the same
 /// shape. Merging also means the room's input path cannot be dropped by
 /// configuring a different server — losing it is losing the room.
-pub fn channel_launch_args(base: &[String]) -> Vec<String> {
-    let room = format!("server:{SERVER_NAME}");
+///
+/// `server_name` is this participant's own (`server_name_for`), so the flag and
+/// the `.mcp.json` key stay one fact even though that fact now differs per
+/// session.
+pub fn channel_launch_args(base: &[String], server_name: &str) -> Vec<String> {
+    let room = format!("server:{server_name}");
     let mut args = base.to_vec();
 
     if args.iter().any(|arg| *arg == room) {
@@ -148,6 +211,7 @@ fn spawn_form(runner: &Path, entry: &Path) -> (&'static str, Vec<String>) {
 /// touched; existing servers and unrelated top-level keys survive verbatim.
 pub fn register_sidecar(dir: &Path, room: &RoomRegistration<'_>) -> Result<PathBuf, String> {
     let (command, args) = spawn_form(room.sidecar_runner, room.sidecar_entry);
+    let server_name = server_name_for(room.agent_name);
 
     let path = dir.join(".mcp.json");
     let mut root: Value = if path.exists() {
@@ -175,17 +239,42 @@ pub fn register_sidecar(dir: &Path, room: &RoomRegistration<'_>) -> Result<PathB
         return Err(format!("{} has a non-object mcpServers.", path.display()));
     }
 
-    servers.as_object_mut().expect("checked above").insert(
-        SERVER_NAME.to_string(),
+    let servers = servers.as_object_mut().expect("checked above");
+
+    // Entries this app wrote in an earlier run can never connect: the room
+    // binds a fresh port every run, so their address is dead. Left in place
+    // they would have every CLI started in this directory spawn a sidecar that
+    // retries nothing forever, and the file would grow by one key per name ever
+    // used here. Entries carrying the current address are live siblings — the
+    // other sessions of this run — and stay. Entries with no `LIPLUS_ROOM_URL`
+    // at all are not ours to judge, whatever they are named.
+    servers.retain(|name, entry| {
+        if !name.starts_with(SERVER_PREFIX) {
+            return true;
+        }
+        match entry.get("env").and_then(|env| env.get("LIPLUS_ROOM_URL")) {
+            Some(Value::String(url)) => url == room.room_url,
+            _ => true,
+        }
+    });
+
+    let mut env = Map::new();
+    env.insert("LIPLUS_ROOM_URL".into(), json!(room.room_url));
+    env.insert("LIPLUS_ROOM_TOKEN".into(), json!(room.token));
+    env.insert("LIPLUS_AGENT_NAME".into(), json!(room.agent_name));
+    env.insert("LIPLUS_ROOM_ID".into(), json!("liplus-chat"));
+    // Only when declared. An undeclared participant is a participant the room
+    // derives a hue for, which is not the same state as one who chose that hue.
+    if let Some(hue) = room.agent_hue {
+        env.insert("LIPLUS_AGENT_HUE".into(), json!(format!("{hue:.1}")));
+    }
+
+    servers.insert(
+        server_name,
         json!({
             "command": command,
             "args": args,
-            "env": {
-                "LIPLUS_ROOM_URL": room.room_url,
-                "LIPLUS_ROOM_TOKEN": room.token,
-                "LIPLUS_AGENT_NAME": room.agent_name,
-                "LIPLUS_ROOM_ID": "liplus-chat",
-            },
+            "env": Value::Object(env),
         }),
     );
 
@@ -228,6 +317,7 @@ mod tests {
             room_url: "ws://127.0.0.1:1234",
             token: "tok",
             agent_name: "Lin",
+            agent_hue: None,
             sidecar_entry: entry,
             sidecar_runner: runner,
         }
@@ -246,11 +336,20 @@ mod tests {
             register_sidecar(scratch.path(), &registration(&entry, &runner)).expect("register");
 
         let json = read(&path);
-        let server = &json["mcpServers"][SERVER_NAME];
+        let server = &json["mcpServers"][server_name_for("Lin")];
         assert_eq!(server["env"]["LIPLUS_ROOM_URL"], "ws://127.0.0.1:1234");
         assert_eq!(server["env"]["LIPLUS_ROOM_TOKEN"], "tok");
         assert_eq!(server["env"]["LIPLUS_AGENT_NAME"], "Lin");
         assert_eq!(server["env"]["LIPLUS_ROOM_ID"], "liplus-chat");
+        // Undeclared is the key absent, not a default value: a hue written here
+        // would be a declaration this participant never made.
+        assert!(
+            !server["env"]
+                .as_object()
+                .expect("env")
+                .contains_key("LIPLUS_AGENT_HUE"),
+            "an undeclared hue must leave no key behind"
+        );
 
         // Absolute paths and nothing looked up by name: the CLI runs this from
         // the user's own directory, where `npx tsx` found no tsx and asked to
@@ -284,34 +383,128 @@ mod tests {
         let json = read(&path);
         assert_eq!(json["mcpServers"]["theirs"]["command"], "their-server");
         assert_eq!(json["unrelated"], 42);
-        assert!(json["mcpServers"][SERVER_NAME].is_object());
+        assert!(json["mcpServers"][server_name_for("Lin")].is_object());
     }
 
     #[test]
-    fn re_registering_replaces_only_its_own_entry() {
+    fn re_registering_the_same_name_replaces_its_own_entry() {
         let scratch = Scratch::new();
         let entry = PathBuf::from(ENTRY);
         let runner = PathBuf::from(RUNNER);
 
         register_sidecar(scratch.path(), &registration(&entry, &runner)).expect("first");
         let second = RoomRegistration {
-            room_url: "ws://127.0.0.1:9999",
+            room_url: "ws://127.0.0.1:1234",
             token: "tok2",
-            agent_name: "Lay",
+            agent_name: "Lin",
+            agent_hue: Some(145.0),
             sidecar_entry: &entry,
             sidecar_runner: &runner,
         };
         let path = register_sidecar(scratch.path(), &second).expect("second");
 
         let json = read(&path);
-        let server = &json["mcpServers"][SERVER_NAME];
-        assert_eq!(server["env"]["LIPLUS_ROOM_URL"], "ws://127.0.0.1:9999");
-        assert_eq!(server["env"]["LIPLUS_AGENT_NAME"], "Lay");
+        let server = &json["mcpServers"][server_name_for("Lin")];
+        assert_eq!(server["env"]["LIPLUS_ROOM_TOKEN"], "tok2");
+        assert_eq!(server["env"]["LIPLUS_AGENT_HUE"], "145.0");
         assert_eq!(
             json["mcpServers"].as_object().expect("servers").len(),
             1,
-            "re-registering must not accumulate entries"
+            "relaunching under one name must not accumulate entries"
         );
+    }
+
+    #[test]
+    fn two_participants_in_one_directory_keep_separate_entries() {
+        // The failure this key scheme exists for: two sessions pointed at the
+        // same working directory. Under one fixed key the second launch
+        // overwrote the first one's name while that session was still running,
+        // so the room heard one identity twice (#40).
+        let scratch = Scratch::new();
+        let entry = PathBuf::from(ENTRY);
+        let runner = PathBuf::from(RUNNER);
+
+        register_sidecar(scratch.path(), &registration(&entry, &runner)).expect("Lin");
+        let lay = RoomRegistration {
+            room_url: "ws://127.0.0.1:1234",
+            token: "tok",
+            agent_name: "Lay",
+            agent_hue: Some(25.0),
+            sidecar_entry: &entry,
+            sidecar_runner: &runner,
+        };
+        let path = register_sidecar(scratch.path(), &lay).expect("Lay");
+
+        let json = read(&path);
+        assert_eq!(
+            json["mcpServers"][server_name_for("Lin")]["env"]["LIPLUS_AGENT_NAME"],
+            "Lin",
+            "the first session's identity must survive the second launch"
+        );
+        assert_eq!(
+            json["mcpServers"][server_name_for("Lay")]["env"]["LIPLUS_AGENT_NAME"],
+            "Lay"
+        );
+        assert_eq!(json["mcpServers"].as_object().expect("servers").len(), 2);
+    }
+
+    #[test]
+    fn entries_from_a_previous_run_go_and_foreign_ones_stay() {
+        // The room binds a fresh port every run, so an entry carrying another
+        // address is one no sidecar can reach. Left behind, every CLI started
+        // in this directory would spawn one more sidecar retrying a dead port,
+        // and the file would grow by one key per name ever used here.
+        let scratch = Scratch::new();
+        std::fs::write(
+            scratch.path().join(".mcp.json"),
+            r#"{"mcpServers":{
+                 "liplus-chat-room": {"env":{"LIPLUS_ROOM_URL":"ws://127.0.0.1:1"}},
+                 "liplus-chat-room-lay-00000000": {"env":{"LIPLUS_ROOM_URL":"ws://127.0.0.1:1234"}},
+                 "liplus-chat-room-theirs": {"command":"not-ours"},
+                 "theirs": {"command":"their-server"}
+               }}"#,
+        )
+        .expect("seed");
+
+        let entry = PathBuf::from(ENTRY);
+        let runner = PathBuf::from(RUNNER);
+        let path =
+            register_sidecar(scratch.path(), &registration(&entry, &runner)).expect("register");
+
+        let json = read(&path);
+        let servers = json["mcpServers"].as_object().expect("servers");
+        assert!(
+            !servers.contains_key("liplus-chat-room"),
+            "an entry from a previous run must go"
+        );
+        assert!(
+            servers.contains_key("liplus-chat-room-lay-00000000"),
+            "a live sibling of this run must stay"
+        );
+        assert!(
+            servers.contains_key("liplus-chat-room-theirs"),
+            "an entry with no room address of ours is not ours to remove"
+        );
+        assert!(servers.contains_key("theirs"));
+        assert!(servers.contains_key(&server_name_for("Lin")));
+    }
+
+    #[test]
+    fn a_server_name_is_a_function_of_the_declared_name() {
+        // Readable where the name has ASCII in it, and total where it has none:
+        // a name that slugged to nothing would put every such participant back
+        // on one key, which is the collision this replaces.
+        assert_eq!(server_name_for("Lin"), server_name_for("Lin"));
+        assert_ne!(server_name_for("Lin"), server_name_for("Lay"));
+        assert!(server_name_for("Lin").starts_with("liplus-chat-room-lin-"));
+        assert!(server_name_for("マスター").starts_with("liplus-chat-room-"));
+        assert_ne!(server_name_for("マスター"), server_name_for("ますたー"));
+        // Two names that slug alike are still two entries.
+        assert_ne!(server_name_for("Lin"), server_name_for("lin!"));
+        // Nothing outside the set a console and a JSON key both leave alone.
+        assert!(server_name_for("Lin さん / 2")
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-'));
     }
 
     #[test]
@@ -365,13 +558,14 @@ mod tests {
         .map(|s| s.to_string())
         .collect();
 
-        let merged = channel_launch_args(&base);
+        let room = server_name_for("Lin");
+        let merged = channel_launch_args(&base, &room);
         assert_eq!(
             merged,
             vec![
                 "--dangerously-skip-permissions".to_string(),
                 CHANNEL_FLAG.to_string(),
-                format!("server:{SERVER_NAME}"),
+                format!("server:{room}"),
                 "server:github-webhook-mcp".to_string(),
             ]
         );
@@ -384,8 +578,9 @@ mod tests {
 
     #[test]
     fn does_not_add_the_room_twice() {
-        let base = vec![CHANNEL_FLAG.to_string(), format!("server:{SERVER_NAME}")];
-        assert_eq!(channel_launch_args(&base), base);
+        let room = server_name_for("Lin");
+        let base = vec![CHANNEL_FLAG.to_string(), format!("server:{room}")];
+        assert_eq!(channel_launch_args(&base, &room), base);
     }
 
     #[test]
@@ -416,13 +611,26 @@ mod tests {
     fn the_launch_flag_names_the_server_the_config_registers() {
         // The flag and the `.mcp.json` key are one fact in two places; a drift
         // between them fails as a room that never receives anything.
-        let args = channel_launch_args(&["--verbose".to_string()]);
+        let scratch = Scratch::new();
+        let entry = PathBuf::from(ENTRY);
+        let runner = PathBuf::from(RUNNER);
+        let path =
+            register_sidecar(scratch.path(), &registration(&entry, &runner)).expect("register");
+        let registered = read(&path)["mcpServers"]
+            .as_object()
+            .expect("servers")
+            .keys()
+            .next()
+            .expect("one entry")
+            .clone();
+
+        let args = channel_launch_args(&["--verbose".to_string()], &server_name_for("Lin"));
         assert_eq!(
             args,
             vec![
                 "--verbose".to_string(),
                 "--dangerously-load-development-channels".to_string(),
-                format!("server:{SERVER_NAME}"),
+                format!("server:{registered}"),
             ]
         );
     }

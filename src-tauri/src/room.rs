@@ -6,7 +6,7 @@
 //!
 //! Frames on the wire are the room protocol:
 //!
-//!   sidecar -> room : { type: "hello", protocol, name }
+//!   sidecar -> room : { type: "hello", protocol, name, hue? }
 //!   both ways       : { type: "post", message_id, speaker, content, to?, ts }
 //!
 //! One frame kind carries speech, whoever produced it. A person and a session
@@ -24,13 +24,23 @@
 //! never read off the frame. A sender cannot claim to be someone else, and the
 //! roster and the attribution cannot disagree.
 //!
+//! `hello` carries who this participant is in the room: the name they answer to
+//! and, optionally, the hue they chose to be drawn in. Both are declarations
+//! made at the moment of joining, which is the one moment a participant has to
+//! make them — the same moment, and the same pair, the screen's own person
+//! declares through `room_join`.
+//!
+//! Roster identity is the connection, not the name. Two participants may answer
+//! to one name; they are still two, and one of them leaving must not take the
+//! other off the roster (#40).
+//!
 //! Everything the frontend needs arrives as a `room-message` event. The room
 //! never reads a CLI's terminal output; that is not a message source.
 
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::net::TcpListener;
@@ -43,7 +53,8 @@ use uuid::Uuid;
 /// Bumped when a frame's shape changes in a way a sidecar must notice.
 ///
 /// 2: `say` and `reply` collapsed into one `post` frame; `agent` became `name`.
-pub const PROTOCOL_VERSION: u32 = 2;
+/// 3: `hello` carries the declared `hue` beside the name.
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// One post of the room, as the frontend sees it.
 ///
@@ -55,10 +66,32 @@ pub struct RoomMessage {
     pub message_id: String,
     /// Display name of the speaker.
     pub speaker: String,
+    /// The hue the speaker declared, in oklch degrees, or `None` when they
+    /// declared none. Carried on the message rather than looked up by name on
+    /// the screen: a name is not an identity here, so a lookup by name is the
+    /// wrong participant as soon as two answer to one name.
+    pub hue: Option<f64>,
     pub content: String,
     pub to: Option<String>,
     pub ts: String,
     /// True when this screen's own participant produced it.
+    pub own: bool,
+}
+
+/// One participant of the room, as the roster shows them.
+///
+/// `id` is the connection, and it is what the roster is keyed on. `name` is
+/// what they are called and what a post can be addressed to — a display and
+/// addressing attribute, never the identity.
+#[derive(Debug, Clone, Serialize)]
+pub struct Participant {
+    pub id: String,
+    pub name: String,
+    /// Declared at join; `None` when this participant declared none, which the
+    /// screen answers by deriving one from the name.
+    pub hue: Option<f64>,
+    /// True for this screen's own person. Viewer-relative, like a message's
+    /// `own`, and there is one screen.
     pub own: bool,
 }
 
@@ -89,19 +122,28 @@ struct IncomingFrame {
     kind: String,
     message_id: Option<String>,
     name: Option<String>,
+    hue: Option<f64>,
     content: Option<String>,
     to: Option<String>,
     ts: Option<String>,
     protocol: Option<u32>,
 }
 
+/// What the room holds about one seated participant.
+#[derive(Debug, Clone)]
+struct Seat {
+    name: String,
+    hue: Option<f64>,
+}
+
 struct RoomInner {
     port: Option<u16>,
-    /// Everyone in the room, people and sessions alike.
-    participants: BTreeSet<String>,
-    /// The name this screen's person currently answers to, so a rename
-    /// replaces the roster entry rather than adding a second one.
-    local_name: Option<String>,
+    /// Everyone in the room, people and sessions alike, keyed by the connection
+    /// they are in it on. Keyed on the connection rather than the name because
+    /// a name is not unique: under a name-keyed roster two participants called
+    /// `Claude Code` were one entry, and either of them disconnecting removed
+    /// both (#40).
+    participants: BTreeMap<String, Seat>,
 }
 
 /// Shared handle to the room socket. Cloneable; all clones share one room.
@@ -124,8 +166,7 @@ impl RoomState {
         RoomState {
             inner: Arc::new(Mutex::new(RoomInner {
                 port: None,
-                participants: BTreeSet::new(),
-                local_name: None,
+                participants: BTreeMap::new(),
             })),
             to_participants,
             token: Uuid::new_v4().to_string(),
@@ -141,39 +182,69 @@ impl RoomState {
         self.inner.lock().port
     }
 
-    pub fn participants(&self) -> Vec<String> {
-        self.inner.lock().participants.iter().cloned().collect()
+    /// The roster, in name order.
+    ///
+    /// Ordered by name because that is what is read, and tie-broken on the id
+    /// so two participants sharing a name hold a stable order rather than
+    /// swapping places between emits.
+    pub fn participants(&self) -> Vec<Participant> {
+        let inner = self.inner.lock();
+        let mut roster: Vec<Participant> = inner
+            .participants
+            .iter()
+            .map(|(id, seat)| Participant {
+                id: id.clone(),
+                name: seat.name.clone(),
+                hue: seat.hue,
+                own: *id == self.local_origin,
+            })
+            .collect();
+        roster.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
+        roster
+    }
+
+    /// The hue declared by whoever is on `origin`, for stamping onto a post.
+    fn hue_of(&self, origin: &str) -> Option<f64> {
+        self.inner.lock().participants.get(origin).and_then(|seat| seat.hue)
     }
 
     fn set_port(&self, port: u16) {
         self.inner.lock().port = Some(port);
     }
 
-    fn add_participant(&self, name: &str) {
-        self.inner.lock().participants.insert(name.to_string());
-    }
-
-    fn remove_participant(&self, name: &str) {
-        self.inner.lock().participants.remove(name);
-    }
-
-    /// Seat this screen's person in the room under `name`, replacing an
-    /// earlier seat.
+    /// Seat a participant on the connection they arrived on.
     ///
-    /// Returns true when the roster changed, so a rename that is not a rename
-    /// does not emit a roster event.
-    fn seat_local(&self, name: &str) -> bool {
+    /// One seat per connection, so re-seating replaces rather than adds: a
+    /// participant who renames themselves is the same participant.
+    ///
+    /// Returns true when the roster changed, so a declaration that declares
+    /// nothing new does not emit a roster event.
+    fn seat(&self, origin: &str, name: &str, hue: Option<f64>) -> bool {
         let mut inner = self.inner.lock();
-        if inner.local_name.as_deref() == Some(name) {
-            return false;
+        let seat = Seat {
+            name: name.to_string(),
+            hue,
+        };
+        match inner.participants.get(origin) {
+            Some(current) if current.name == seat.name && current.hue == seat.hue => false,
+            _ => {
+                inner.participants.insert(origin.to_string(), seat);
+                true
+            }
         }
-        if let Some(previous) = inner.local_name.take() {
-            inner.participants.remove(&previous);
-        }
-        inner.participants.insert(name.to_string());
-        inner.local_name = Some(name.to_string());
-        true
     }
+
+    fn unseat(&self, origin: &str) {
+        self.inner.lock().participants.remove(origin);
+    }
+}
+
+/// A hue is a position on the colour wheel, so it is taken modulo a turn rather
+/// than rejected. `None` for a value that is not a number at all: an undeclared
+/// hue and an unusable one are the same state to the screen, which derives one.
+fn normalize_hue(hue: Option<f64>) -> Option<f64> {
+    hue.filter(|value| value.is_finite())
+        .map(|value| value.rem_euclid(360.0))
 }
 
 /// Absent is the key omitted, never an empty one: a participant matching `to`
@@ -253,6 +324,9 @@ fn deliver(app: &AppHandle, room: &RoomState, origin: &str, post: Post) {
         RoomMessage {
             message_id: post.message_id,
             speaker: post.speaker,
+            // Read off the seat on this connection, so the colour of a line and
+            // the colour of its author's roster entry are the one declaration.
+            hue: room.hue_of(origin),
             content: post.content,
             to: post.to,
             ts: post.ts,
@@ -368,7 +442,9 @@ async fn serve_participant(
                         frame.protocol
                     );
                 }
-                room.add_participant(&name);
+                // Seated on this connection. A second session answering to the
+                // same name is a second seat, not the same one.
+                room.seat(&origin, &name, normalize_hue(frame.hue));
                 joined_as = Some(name);
                 let _ = app.emit("room-participants", room.participants());
             }
@@ -396,8 +472,11 @@ async fn serve_participant(
     }
 
     pump.abort();
-    if let Some(name) = joined_as {
-        room.remove_participant(&name);
+    if joined_as.is_some() {
+        // By connection. Removing by name took every participant answering to
+        // that name off the roster, so one session ending emptied the other's
+        // seat too (#40).
+        room.unseat(&origin);
         let _ = app.emit("room-participants", room.participants());
     }
     Ok(())
@@ -411,26 +490,32 @@ pub fn room_port(state: tauri::State<RoomState>) -> Option<u16> {
 }
 
 #[tauri::command]
-pub fn room_participants(state: tauri::State<RoomState>) -> Vec<String> {
+pub fn room_participants(state: tauri::State<RoomState>) -> Vec<Participant> {
     state.participants()
 }
 
-/// Seat this screen's person in the room under `name`.
+/// Seat this screen's person in the room, under the name and hue they declared.
 ///
 /// A person is in the room by being there, not by speaking: without this the
 /// roster would list only sessions until the first utterance, and nobody could
 /// address someone who had not spoken yet.
+///
+/// `hue` is optional and the same declaration a session makes in its `hello`.
+/// The screen's person and a session take one seat of the same kind, and there
+/// is one path to it.
 #[tauri::command]
 pub fn room_join(
     app: AppHandle,
     state: tauri::State<RoomState>,
     name: String,
+    hue: Option<f64>,
 ) -> Result<(), String> {
     let name = name.trim().to_string();
     if name.is_empty() {
         return Err("name is empty".to_string());
     }
-    if state.seat_local(&name) {
+    let local_origin = state.local_origin.clone();
+    if state.seat(&local_origin, &name, normalize_hue(hue)) {
         let _ = app.emit("room-participants", state.participants());
     }
     Ok(())
@@ -459,13 +544,16 @@ pub fn room_post(
         return Err("speaker is empty".to_string());
     }
     // Speaking is being present. A post under a name the roster has not seen
-    // seats it, so the two cannot disagree.
-    if state.seat_local(&speaker) {
+    // seats it, so the two cannot disagree. The hue is left as it stands: the
+    // composer declares nothing, and passing `None` here would silently
+    // withdraw a declaration the person made in the titlebar.
+    let local_origin = state.local_origin.clone();
+    let seated_hue = state.hue_of(&local_origin);
+    if state.seat(&local_origin, &speaker, seated_hue) {
         let _ = app.emit("room-participants", state.participants());
     }
 
     let message_id = Uuid::new_v4().to_string();
-    let local_origin = state.local_origin.clone();
     deliver(
         &app,
         &state,

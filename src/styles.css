@@ -10,7 +10,10 @@
   /* One participant is told from another by hue alone: every participant
      colour is the accent's own lightness and chroma with the hue turned. The
      pair below is #3a6ea5 measured in oklch, not a value chosen next to it, so
-     a participant sits at the same weight on the page as the accent does. */
+     a participant sits at the same weight on the page as the accent does.
+     This pair is what a participant may not choose — declaring a colour
+     declares a hue, and these two hold whatever hue lands on them readable in
+     this theme. */
   --speaker-l: 0.528;
   --speaker-c: 0.104;
 }
@@ -137,13 +140,16 @@ body {
 
 /* Speaker attribution is the load-bearing distinction in this room, so one
    participant is separated from another by colour as well as by name. The axis
-   is the participant: `--speaker` is set per line from the name on it, so the
-   colour beside a line and the dot beside that name in the panel are the same
+   is the participant: `--speaker` is set per line from that participant, so the
+   colour beside a line and the dot beside their name in the panel are the same
    colour, and a line can be traced to a participant without reading it.
    Self/other was the earlier axis (#39) and is a two-valued one — it gave every
-   participant but oneself one shared colour. Oneself keeps the accent, and the
-   derived hues leave a gap around it, so that one colour still reads as one's
-   own. */
+   participant but oneself one shared colour.
+   Where the hue comes from is a ladder, resolved in src/main.ts: a hue the
+   participant declared, else the accent for oneself, else one derived from the
+   name. The derived hues leave a gap around the accent so that colour still
+   reads as one's own; a declared one is free of that gap, because it was
+   chosen. */
 .message {
   max-width: 46rem;
   border-left: 3px solid var(--speaker, var(--line));
@@ -386,6 +392,20 @@ body {
   border-bottom: 1px solid var(--line);
   padding: 0.4rem 0.9rem;
   font-size: 0.8rem;
+}
+
+/* The name and colour this session joins under. The same pair the titlebar
+   carries for this screen's person, in the row where a launch is set up: both
+   are declared at the moment of joining, so both are set where joining is. */
+#launcher .who {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+}
+
+#launcher .who input {
+  width: 7rem;
 }
 
 #launcher .cwd {

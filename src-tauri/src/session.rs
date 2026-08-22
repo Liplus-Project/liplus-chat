@@ -11,7 +11,10 @@
 use crate::config::TabConfig;
 use crate::pty::{self, PtyState};
 use crate::room::RoomState;
-use mcp_config::{channel_launch_args, register_sidecar, reject_incompatible_flags, RoomRegistration};
+use mcp_config::{
+    channel_launch_args, register_sidecar, reject_incompatible_flags, server_name_for,
+    RoomRegistration,
+};
 use std::path::PathBuf;
 use tauri::AppHandle;
 
@@ -83,9 +86,14 @@ pub fn parse_launch_options(text: String) -> Vec<String> {
 ///
 /// The app merges its own channel entry into what the person wrote, so the
 /// line they typed is not the line that runs. This returns the line that runs.
+///
+/// The entry names this session's own server, which is a function of the name
+/// being launched under, so the preview moves as the name field is typed in.
+/// That is the point rather than a side effect: the identity a session is about
+/// to take is the thing this launch is now choosing.
 #[tauri::command]
-pub fn preview_launch_args(args: Vec<String>) -> Vec<String> {
-    channel_launch_args(&args)
+pub fn preview_launch_args(args: Vec<String>, name: String) -> Vec<String> {
+    channel_launch_args(&args, &server_name_for(name.trim()))
 }
 
 /// What the caller gets back after a session joins.
@@ -104,15 +112,34 @@ pub struct StartedSession {
     pub started_at: String,
 }
 
+/// Launch one session under a declared identity.
+///
+/// `name` and `hue` are the session's own, not the tab's. A tab is which CLI to
+/// run; who joins the room is chosen at the moment of joining, the same way the
+/// screen's person chooses theirs. Under the tab-attribute form every launch
+/// answered to the one name in the default config, so two sessions were both
+/// `Claude Code` and neither could be addressed (#40).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn start_session(
     app: AppHandle,
     room: tauri::State<RoomState>,
     pty_state: tauri::State<PtyState>,
     tab: TabConfig,
+    name: String,
+    hue: Option<f64>,
     cols: u16,
     rows: u16,
 ) -> Result<StartedSession, String> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(
+            "This session has no name. Give it one before starting: it is what the room \
+             lists it under and what a post is addressed to."
+                .to_string(),
+        );
+    }
+
     if let Err(flag) = reject_incompatible_flags(&tab.args) {
         return Err(format!(
             "Tab \"{}\" passes {flag}, which stops channel pushes from arriving. \
@@ -143,12 +170,16 @@ pub fn start_session(
     }
 
     let (sidecar_entry, sidecar_runner) = resolve_sidecar_paths()?;
+    // Keyed on the name, so two sessions launched into one working directory
+    // write two entries instead of overwriting each other's identity (#40).
+    let server_name = server_name_for(&name);
     let mcp_config = register_sidecar(
         &cwd,
         &RoomRegistration {
             room_url: &room_url,
             token: &room.token(),
-            agent_name: &tab.name,
+            agent_name: &name,
+            agent_hue: hue,
             sidecar_entry: &sidecar_entry,
             sidecar_runner: &sidecar_runner,
         },
@@ -159,7 +190,7 @@ pub fn start_session(
         app,
         pty_state,
         tab.command.clone(),
-        channel_launch_args(&tab.args),
+        channel_launch_args(&tab.args, &server_name),
         cols,
         rows,
         Some(cwd.to_string_lossy().to_string()),

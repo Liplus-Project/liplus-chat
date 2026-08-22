@@ -20,6 +20,10 @@ import "@xterm/xterm/css/xterm.css";
 interface RoomMessage {
   message_id: string;
   speaker: string;
+  /** The hue the speaker declared, or null when they declared none. Stamped by
+   *  the room from the connection the post arrived on, so it is that speaker's
+   *  and not whoever else currently answers to the same name. */
+  hue: number | null;
   content: string;
   to: string | null;
   ts: string;
@@ -28,8 +32,24 @@ interface RoomMessage {
   own: boolean;
 }
 
+/**
+ * One participant of the room, as the roster lists them.
+ *
+ * `id` is the connection they are in the room on, and it is the identity. The
+ * name is what they are called and what a post is addressed to; two
+ * participants may answer to one name and are still two.
+ */
+interface Participant {
+  id: string;
+  name: string;
+  hue: number | null;
+  own: boolean;
+}
+
 interface TabConfig {
   id: string;
+  /** The tab's label — which CLI it launches. Not the name a session takes in
+   *  the room: that is chosen per launch, in the launcher. */
   name: string;
   command: string;
   args: string[];
@@ -49,6 +69,32 @@ interface StartedSession {
 }
 
 const NAME_KEY = "liplus-chat.display-name";
+const HUE_KEY = "liplus-chat.display-hue";
+const SESSION_NAME_KEY = "liplus-chat.session-name";
+const SESSION_HUE_KEY = "liplus-chat.session-hue";
+
+/**
+ * The hues a participant can declare.
+ *
+ * Hue only. Lightness and chroma stay the accent's in whichever theme is
+ * showing, so a declared colour sits at the same weight on the page as every
+ * other participant's and stays readable in both themes (#43). Offering a full
+ * colour picker would ask for two values and silently discard them.
+ *
+ * A short list rather than a continuous dial: what this has to buy is that any
+ * two participants can be told apart, and eight positions spread round the
+ * wheel buy it without asking anyone to judge degrees.
+ */
+const HUES: { label: string; hue: number }[] = [
+  { label: "赤", hue: 25 },
+  { label: "橙", hue: 55 },
+  { label: "黄", hue: 95 },
+  { label: "緑", hue: 145 },
+  { label: "青緑", hue: 195 },
+  { label: "青", hue: 250 },
+  { label: "紫", hue: 300 },
+  { label: "桃", hue: 350 },
+];
 
 /**
  * Hue of `--accent`, and the arc the other participants are drawn from.
@@ -64,7 +110,10 @@ const DERIVED_ARC = 360 - RESERVED_ARC * 2;
 const roomEl = document.getElementById("room") as HTMLElement;
 const rosterEl = document.getElementById("roster") as HTMLElement;
 const nameEl = document.getElementById("display-name") as HTMLInputElement;
+const hueEl = document.getElementById("display-hue") as HTMLSelectElement;
 const tabEl = document.getElementById("tab-select") as HTMLSelectElement;
+const sessionNameEl = document.getElementById("session-name") as HTMLInputElement;
+const sessionHueEl = document.getElementById("session-hue") as HTMLSelectElement;
 const startEl = document.getElementById("start-session") as HTMLButtonElement;
 const inputEl = document.getElementById("input") as HTMLTextAreaElement;
 const sendEl = document.getElementById("send") as HTMLButtonElement;
@@ -86,7 +135,7 @@ const previewEl = document.getElementById("launch-preview") as HTMLElement;
 
 let tabs: TabConfig[] = [];
 /** Everyone in the room, this screen's person included. */
-let participants: string[] = [];
+let participants: Participant[] = [];
 /** The session the terminal is attached to, once one is running. */
 let activePtyId: string | null = null;
 
@@ -164,11 +213,44 @@ async function refreshPreview(): Promise<void> {
   }
   try {
     const parsed = await invoke<string[]>("parse_launch_options", { text: optionsEl.value });
-    const merged = await invoke<string[]>("preview_launch_args", { args: parsed });
+    // The channel entry names this session's own server, which follows the
+    // name being launched under, so the preview moves as that field is typed.
+    const merged = await invoke<string[]>("preview_launch_args", {
+      args: parsed,
+      name: sessionName(),
+    });
     previewEl.textContent = `${tab.command} ${joinArgs(merged)}`;
   } catch {
     previewEl.textContent = "";
   }
+}
+
+/**
+ * Fill a hue picker, with "not declared" first.
+ *
+ * Both pickers are filled from the one list, because a person and a session
+ * declare a colour from the same set. Not declaring is an option rather than an
+ * omission: a participant who chose no colour still joins, and the room derives
+ * one for them from their name.
+ */
+function fillHues(select: HTMLSelectElement, saved: string | null): void {
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "既定（名前から）";
+  select.appendChild(none);
+
+  for (const { label, hue } of HUES) {
+    const option = document.createElement("option");
+    option.value = String(hue);
+    option.textContent = label;
+    select.appendChild(option);
+  }
+  select.value = saved !== null && HUES.some(({ hue }) => String(hue) === saved) ? saved : "";
+}
+
+/** The hue a picker currently declares, or null for "not declared". */
+function declaredHue(select: HTMLSelectElement): number | null {
+  return select.value === "" ? null : Number(select.value);
 }
 
 /**
@@ -193,11 +275,26 @@ function hueFor(name: string): number {
  * The colour a participant is drawn in.
  *
  * Lightness and chroma are the accent's, in whichever theme is showing; only
- * the hue turns. Oneself is the accent itself rather than a hue derived from
- * one's own name, which is what keeps one colour in the room recognisably
- * one's own now that colour no longer runs on the self/other axis.
+ * the hue turns. One ladder, in this order:
+ *
+ *   declared > oneself's accent > derived from the name
+ *
+ * A declaration outranks both. Derivation is stable but not choosable, and the
+ * three names actually in use landed inside a 75° band — at the accent's low
+ * chroma that is not a difference anyone can read, so colour stopped doing the
+ * one job it was added for (#40).
+ *
+ * That the accent is below the declaration is the deliberate half. Oneself
+ * keeps it while nothing is declared, so nothing changes for a participant who
+ * declares nothing; declaring a colour takes it, because a declared colour that
+ * showed to everyone except the person who declared it is not the colour they
+ * declared. What then says which participant is oneself is the roster's
+ * 「（あなた）」 and the name on the line — colour was the faster of the three
+ * carriers, never the only one, and it is the one that is now chosen rather
+ * than assigned.
  */
-function speakerColor(name: string, own: boolean): string {
+function speakerColor(name: string, hue: number | null, own: boolean): string {
+  if (hue !== null) return `oklch(var(--speaker-l) var(--speaker-c) ${hue.toFixed(1)})`;
   if (own) return "var(--accent)";
   return `oklch(var(--speaker-l) var(--speaker-c) ${hueFor(name).toFixed(1)})`;
 }
@@ -217,7 +314,10 @@ function appendMessage(message: RoomMessage): void {
   line.className = "message";
   // `own` rather than a name test: the room decides self on the connection a
   // post arrived on, which a rename cannot blur (#40).
-  line.style.setProperty("--speaker", speakerColor(message.speaker, message.own));
+  line.style.setProperty(
+    "--speaker",
+    speakerColor(message.speaker, message.hue, message.own),
+  );
 
   const head = document.createElement("div");
   head.className = "meta";
@@ -259,9 +359,8 @@ function appendMessage(message: RoomMessage): void {
  * in the room, which is what makes the panel a legend for the conversation
  * rather than a second copy of the same names.
  */
-function renderRoster(joined: string[]): void {
+function renderRoster(joined: Participant[]): void {
   participants = joined;
-  const mine = localName();
   rosterEl.replaceChildren();
 
   if (!joined.length) {
@@ -271,21 +370,25 @@ function renderRoster(joined: string[]): void {
     rosterEl.appendChild(empty);
   }
 
-  for (const name of joined) {
-    const own = name === mine;
+  for (const participant of joined) {
+    // `own` comes from the room, decided on the connection. A name test here
+    // would mark every participant answering to this screen's name as oneself.
     const entry = document.createElement("li");
-    entry.style.setProperty("--speaker", speakerColor(name, own));
+    entry.style.setProperty(
+      "--speaker",
+      speakerColor(participant.name, participant.hue, participant.own),
+    );
 
     const dot = document.createElement("span");
     dot.className = "dot";
 
     const who = document.createElement("span");
     who.className = "who";
-    who.textContent = name;
-    who.title = name;
+    who.textContent = participant.name;
+    who.title = participant.name;
 
     entry.append(dot, who);
-    if (own) {
+    if (participant.own) {
       const you = document.createElement("span");
       you.className = "self";
       you.textContent = "（あなた）";
@@ -302,16 +405,25 @@ function localName(): string {
   return nameEl.value.trim() || "human";
 }
 
+/** The name the next session will join under. */
+function sessionName(): string {
+  return sessionNameEl.value.trim();
+}
+
 /**
- * Take a seat in the room under the current name.
+ * Take a seat in the room under the current name and colour.
  *
  * Being in the room is not the same as having spoken in it: without this the
  * roster would list only the sessions, and nobody could address someone who
  * had not spoken yet.
+ *
+ * The colour goes with the name because they are one declaration, and because
+ * a seat carries both — sending the name alone on a rename would withdraw a
+ * colour nobody withdrew.
  */
 async function join(): Promise<void> {
   try {
-    await invoke("room_join", { name: localName() });
+    await invoke("room_join", { name: localName(), hue: declaredHue(hueEl) });
   } catch {
     // Failing to seat is not worth interrupting anything: the first post
     // seats the name anyway.
@@ -332,8 +444,12 @@ async function join(): Promise<void> {
  */
 function renderAddressees(): void {
   const chosen = toEl.value;
-  const mine = localName();
-  const addressable = participants.filter((name) => name !== mine);
+  // Names, deduplicated: `to` carries a display name, so two participants
+  // answering to one name are one option — listing it twice would offer a
+  // choice between two identical things that address the same pair anyway.
+  const addressable = [
+    ...new Set(participants.filter((one) => !one.own).map((one) => one.name)),
+  ];
   toEl.replaceChildren();
 
   const everyone = document.createElement("option");
@@ -377,8 +493,12 @@ async function send(): Promise<void> {
  * the room simply stays empty. Without this the screen is identical whether
  * the CLI is running or was never there.
  */
-async function followSession(tab: TabConfig, started: StartedSession): Promise<void> {
-  sessionStateEl.textContent = `${tab.name} 起動中`;
+async function followSession(
+  tab: TabConfig,
+  name: string,
+  started: StartedSession,
+): Promise<void> {
+  sessionStateEl.textContent = `${name} 起動中`;
   sessionStateEl.dataset.kind = "ok";
   activePtyId = started.pty_id;
 
@@ -397,9 +517,9 @@ async function followSession(tab: TabConfig, started: StartedSession): Promise<v
   await listen<number | null>(`pty-exit-${started.pty_id}`, (event) => {
     const code = event.payload;
     const detail = code === null ? "終了コード不明" : `終了コード ${code}`;
-    sessionStateEl.textContent = `${tab.name} 終了（${detail}）`;
+    sessionStateEl.textContent = `${name} 終了（${detail}）`;
     sessionStateEl.dataset.kind = "error";
-    status(`${tab.name} が終了しました（${detail}）。診断を確認してください。`, "error");
+    status(`${name} が終了しました（${detail}）。診断を確認してください。`, "error");
     activePtyId = null;
     revealDiagnostics();
   });
@@ -416,6 +536,18 @@ async function startSession(): Promise<void> {
     status("起動するセッションが選ばれていません。", "error");
     return;
   }
+
+  // The identity this session joins under. Refused rather than defaulted: an
+  // unnamed session is the state this whole surface exists to end, and quietly
+  // falling back to the tab's label is how every session came to answer to
+  // `Claude Code` (#40).
+  const name = sessionName();
+  if (!name) {
+    status("セッションの名前を入力してください。部屋での名乗りになります。", "error");
+    sessionNameEl.focus();
+    return;
+  }
+  const hue = declaredHue(sessionHueEl);
 
   const cwd = cwdEl.value.trim();
   if (!cwd) {
@@ -435,10 +567,12 @@ async function startSession(): Promise<void> {
   fitAddon.fit();
 
   startEl.disabled = true;
-  status(`${tab.name} を起動しています…`);
+  status(`${name} を起動しています…`);
   try {
     const started = await invoke<StartedSession>("start_session", {
       tab: launching,
+      name,
+      hue,
       cols: terminal.cols,
       rows: terminal.rows,
     });
@@ -449,11 +583,16 @@ async function startSession(): Promise<void> {
       // launch: the session is already up.
       status("作業ディレクトリを保存できませんでした。", "error");
     });
-    status(`${tab.name} を起動しました。${started.mcp_config} に登録済み。`);
-    await followSession(tab, started);
+    // Remembered next to this screen's own name and colour, and in the same
+    // place — the identity a launch declares is not a property of the tab, and
+    // storing it there is what fixed every launch to one name.
+    localStorage.setItem(SESSION_NAME_KEY, name);
+    localStorage.setItem(SESSION_HUE_KEY, sessionHueEl.value);
+    status(`${name} を起動しました。${started.mcp_config} に登録済み。`);
+    await followSession(tab, name, started);
   } catch (err) {
-    status(`${tab.name} を起動できませんでした: ${err}`, "error");
-    sessionStateEl.textContent = `${tab.name} 起動失敗`;
+    status(`${name} を起動できませんでした: ${err}`, "error");
+    sessionStateEl.textContent = `${name} 起動失敗`;
     sessionStateEl.dataset.kind = "error";
     revealDiagnostics();
   } finally {
@@ -519,12 +658,20 @@ async function main(): Promise<void> {
   setUpTerminal();
 
   nameEl.value = localStorage.getItem(NAME_KEY) ?? "human";
-  nameEl.addEventListener("change", () => {
+  fillHues(hueEl, localStorage.getItem(HUE_KEY));
+  fillHues(sessionHueEl, localStorage.getItem(SESSION_HUE_KEY));
+
+  // One handler for both halves of the declaration: a rename and a recolour are
+  // the same act on the same seat, and the room takes them together.
+  const redeclare = (): void => {
     localStorage.setItem(NAME_KEY, localName());
+    localStorage.setItem(HUE_KEY, hueEl.value);
     // The roster entry follows the name, and the addressee list follows the
     // roster: a rename must not leave the old name sitting in either.
     void join().then(() => renderAddressees());
-  });
+  };
+  nameEl.addEventListener("change", redeclare);
+  hueEl.addEventListener("change", redeclare);
 
   toggleEl.addEventListener("click", () => {
     if (diagnosticsEl.hidden) {
@@ -536,7 +683,7 @@ async function main(): Promise<void> {
   });
 
   await listen<RoomMessage>("room-message", (event) => appendMessage(event.payload));
-  await listen<string[]>("room-participants", (event) => renderRoster(event.payload));
+  await listen<Participant[]>("room-participants", (event) => renderRoster(event.payload));
   // The socket binds after the frontend loads, so the event is the authority
   // and the poll below is only for a listener that attached too late.
   await listen<number>("room-ready", (event) => renderSocket(event.payload));
@@ -564,6 +711,9 @@ async function main(): Promise<void> {
     void refreshPreview();
   };
   optionsEl.addEventListener("input", () => void refreshPreview());
+  // The launched line carries this session's own channel entry, which follows
+  // the name, so the preview has to follow it too.
+  sessionNameEl.addEventListener("input", () => void refreshPreview());
 
   try {
     const config = await invoke<AppConfig>("load_config");
@@ -574,6 +724,11 @@ async function main(): Promise<void> {
       option.textContent = tab.name;
       tabEl.appendChild(option);
     }
+    // A prefill, not a default. The tab's label is a legible starting point for
+    // the first launch; what makes it safe is that it is sitting in an editable
+    // field on screen, which is exactly what it was not before (#40).
+    sessionNameEl.value =
+      localStorage.getItem(SESSION_NAME_KEY) ?? tabs[0]?.name ?? "";
     showTab();
     tabEl.addEventListener("change", showTab);
   } catch (err) {
@@ -582,7 +737,7 @@ async function main(): Promise<void> {
 
   try {
     await join();
-    renderRoster(await invoke<string[]>("room_participants"));
+    renderRoster(await invoke<Participant[]>("room_participants"));
     const port = await invoke<number | null>("room_port");
     if (port !== null) renderSocket(port);
   } catch (err) {

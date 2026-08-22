@@ -71,6 +71,7 @@ test("a room post reaches the channel, and say_to_room reaches the room", async 
         ...process.env,
         LIPLUS_ROOM_URL: `ws://127.0.0.1:${port}`,
         LIPLUS_AGENT_NAME: "test-agent",
+        LIPLUS_AGENT_HUE: "145",
         LIPLUS_ROOM_ID: "test-room",
       },
       stdio: ["pipe", "pipe", "pipe"],
@@ -189,8 +190,13 @@ test("a room post reaches the channel, and say_to_room reaches the room", async 
   // ── room -> agent ──────────────────────────────────────────────────────────
   await withTimeout(connected.promise, "sidecar to connect to the room");
   const hello = await withTimeout(helloSeen.promise, "hello frame");
+  // Who this session is in the room, declared at the moment of joining: the
+  // name it answers to, and the hue it is drawn in. Both come from the launch,
+  // not from a stored tab attribute — a stored one made every session answer to
+  // the same name (#40).
   assert.equal(hello.name, "test-agent");
-  assert.equal(hello.protocol, 2);
+  assert.equal(hello.hue, 145);
+  assert.equal(hello.protocol, 3);
 
   roomSocket.send(
     JSON.stringify({
@@ -302,4 +308,53 @@ test("a room post reaches the channel, and say_to_room reaches the room", async 
     offline.result.isError,
     "a send with no room attached must report failure, not silence",
   );
+});
+
+test("a session launched without a declared hue says so by omission", async (t) => {
+  // The undeclared state has to survive the wire. The room derives a colour
+  // from the name for a participant who chose none, and it can only do that
+  // while "chose none" is still distinguishable from a number a default put
+  // there (#40).
+  const http = createServer();
+  const wss = new WebSocketServer({ server: http });
+  await new Promise((r) => http.listen(0, "127.0.0.1", r));
+  const port = http.address().port;
+
+  const helloSeen = deferred();
+  wss.on("connection", (socket) => {
+    socket.on("message", (raw) => {
+      const frame = JSON.parse(raw.toString());
+      if (frame.type === "hello") helloSeen.resolve(frame);
+    });
+  });
+
+  const child = spawn(
+    process.execPath,
+    [join(REPO, "node_modules", "tsx", "dist", "cli.mjs"), ENTRY],
+    {
+      cwd: REPO,
+      env: {
+        ...process.env,
+        LIPLUS_ROOM_URL: `ws://127.0.0.1:${port}`,
+        LIPLUS_AGENT_NAME: "no-colour",
+        LIPLUS_AGENT_HUE: "",
+        LIPLUS_ROOM_ID: "test-room",
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+  // Nothing reads either pipe in this test, and a full one would block the
+  // sidecar before it ever reaches the socket.
+  child.stdout.resume();
+  child.stderr.resume();
+
+  t.after(() => {
+    child.kill();
+    wss.close();
+    http.close();
+  });
+
+  const hello = await withTimeout(helloSeen.promise, "hello frame");
+  assert.equal(hello.name, "no-colour");
+  assert.equal("hue" in hello, false, "an undeclared hue must carry no key");
 });
