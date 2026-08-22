@@ -183,7 +183,12 @@ fn normalize_to(to: Option<String>) -> Option<String> {
         .filter(|name| !name.is_empty())
 }
 
-fn now_iso() -> String {
+/// The room's clock.
+///
+/// One clock for everything the screen puts a time on. A session's start time
+/// is read against the posts around it, so a second implementation elsewhere
+/// would be a second clock to keep in step.
+pub fn now_iso() -> String {
     // Tauri already pulls chrono-free time handling in; a plain RFC3339-ish
     // stamp from SystemTime keeps the dependency list unchanged.
     let now = std::time::SystemTime::now()
